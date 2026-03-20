@@ -5,6 +5,10 @@ from database import engine, Base
 import models
 
 from routers import auth, users, datasets, chat, ai
+from services.logger import setup_logger
+
+# Setup root logger
+setup_logger("app")
 
 
 @asynccontextmanager

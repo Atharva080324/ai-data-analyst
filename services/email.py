@@ -10,6 +10,15 @@ load_dotenv()
  
 resend.api_key = os.getenv("RESEND_API_KEY", "")
 FROM_EMAIL     = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
+
+# FIX (LOW): warn at startup if key is missing so emails don't silently fail.
+if not resend.api_key:
+    import warnings
+    warnings.warn(
+        "RESEND_API_KEY is not set — all OTP emails will fail silently. "
+        "Set RESEND_API_KEY in your .env file.",
+        RuntimeWarning, stacklevel=1,
+    )
 APP_NAME       = "AI Data Analyst"
  
  

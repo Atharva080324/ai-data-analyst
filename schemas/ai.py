@@ -40,10 +40,10 @@ class GenerateSQLResponse(BaseModel):
 
 # ── Insight Response ──────────────────────────────────────────
 class InsightResponse(BaseModel):
-    id:               UUID
+    id:               Optional[UUID]    = None
     insight_text:     str
-    importance_score: Optional[float]
-    created_at:       datetime
+    importance_score: Optional[float]   = None
+    created_at:       Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -51,10 +51,10 @@ class InsightResponse(BaseModel):
 
 # ── Recommendation Response ───────────────────────────────────
 class RecommendationResponse(BaseModel):
-    id:                  UUID
+    id:                  Optional[UUID]    = None
     recommendation_text: str
-    confidence_score:    Optional[float]
-    created_at:          datetime
+    confidence_score:    Optional[float]   = None
+    created_at:          Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -62,10 +62,10 @@ class RecommendationResponse(BaseModel):
 
 # ── Visualization Response ────────────────────────────────────
 class VisualizationResponse(BaseModel):
-    id:           UUID
+    id:           Optional[UUID]     = None
     chart_type:   str
     chart_config: dict
-    created_at:   datetime
+    created_at:   Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -73,10 +73,10 @@ class VisualizationResponse(BaseModel):
 
 # ── Query Result Response ─────────────────────────────────────
 class QueryResultResponse(BaseModel):
-    id:               UUID
-    result_row_count: Optional[int]
-    result_preview:   Optional[List[dict]]
-    created_at:       datetime
+    id:               Optional[UUID]   = None
+    result_row_count: Optional[int]    = None
+    result_preview:   Optional[List[dict]] = None
+    created_at:       Optional[datetime]   = None
 
     class Config:
         from_attributes = True
@@ -84,15 +84,18 @@ class QueryResultResponse(BaseModel):
 
 # ── Full Analyze Response ─────────────────────────────────────
 class AnalyzeResponse(BaseModel):
-    query_id:        UUID
-    user_query:      str
-    generated_sql:   Optional[str]
-    sql_valid:       bool
-    execution_time_ms: Optional[int]
-    result:          Optional[QueryResultResponse]
-    visualizations:  List[VisualizationResponse]  = []
-    insights:        List[InsightResponse]         = []
-    recommendations: List[RecommendationResponse]  = []
+    query_id:          Optional[UUID]   = None   # None when explain route or SQL fails
+    user_query:        str
+    generated_sql:     Optional[str]   = None
+    sql_valid:         bool            = False
+    execution_time_ms: Optional[int]   = None
+    result:            Optional[QueryResultResponse] = None
+    visualizations:    List[VisualizationResponse]   = []
+    insights:          List[InsightResponse]          = []
+    recommendations:   List[RecommendationResponse]  = []
+    error:             Optional[str]   = None
+    final_answer:      Optional[str]   = None
+    followup_questions: List[str]      = []
 
 
 # ── Generic Message ───────────────────────────────────────────
@@ -118,22 +121,26 @@ class AgentRequest(BaseModel):
 
 # ── Agent Response ────────────────────────────────────────────
 class AgentResponse(BaseModel):
-    route:             str
-    user_query:        str
-    plan:              Optional[str]      = None
-    generated_sql:     Optional[str]      = None
-    sql_explanation:   Optional[str]      = None
-    sql_valid:         bool               = False
-    sql_attempts:      int                = 0
-    error_type:        Optional[str]      = None
-    row_count:         int                = 0
-    result_preview:    Optional[List[dict]] = None
-    result_valid:      bool               = False
-    result_issue:      Optional[str]      = None
-    insights:          List[dict]         = []
-    recommendations:   List[dict]         = []
-    chart_config:      Optional[dict]     = None
-    explanation:       Optional[str]      = None
-    final_answer:      Optional[str]      = None
-    execution_time_ms: int                = 0
-    error:             Optional[str]      = None
+    route:               str
+    user_query:          str
+    plan:                Optional[str]       = None
+    selected_tables:     List[str]           = []
+    generated_sql:       Optional[str]       = None
+    reviewed_sql:        Optional[str]       = None
+    sql_explanation:     Optional[str]       = None
+    sql_valid:           bool                = False
+    sql_attempts:        int                 = 0
+    error_type:          Optional[str]       = None
+    row_count:           int                 = 0
+    result_preview:      Optional[List[dict]] = None
+    result_stats:        Optional[dict]      = None
+    result_valid:        bool                = False
+    result_issue:        Optional[str]       = None
+    insights:            List[dict]          = []
+    recommendations:     List[dict]          = []
+    chart_config:        Optional[dict]      = None
+    followup_questions:  List[str]           = []
+    explanation:         Optional[str]       = None
+    final_answer:        Optional[str]       = None
+    execution_time_ms:   int                 = 0
+    error:               Optional[str]       = None

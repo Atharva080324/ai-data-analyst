@@ -371,6 +371,10 @@ def connect_database(
     except Exception:
         db.rollback()
         raise HTTPException(500, "Failed to save schema. Please try again.")
+    finally:
+        # BUG FIX (MEDIUM): ext_engine was never disposed — left a connection
+        # pool open for the external DB after the request completed.
+        ext_engine.dispose()
 
     return {
         "message":    f"'{body.dataset_name}' connected successfully",
