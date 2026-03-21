@@ -227,6 +227,7 @@ def generate_sql_from_groq(schema_text: str, user_query: str) -> tuple[str, str]
                 "STRICT RULES:\n"
                 "- ONLY generate SELECT queries. Never INSERT, UPDATE, DELETE, DROP, or ALTER.\n"
                 "- Use EXACT table and column names from the schema.\n"
+                "- ALWAYS enclose table names and column names in double quotes, e.g. \"My Table\".\n"
                 "- Always wrap your SQL in a ```sql code block.\n"
                 "- After the SQL, write a brief explanation of what the query does.\n"
                 "- If the question cannot be answered with SQL, say so clearly.\n\n"
@@ -505,7 +506,7 @@ def generate_recommendations(
 def generate_chart_config(df: pd.DataFrame, user_query: str) -> Optional[dict]:
     """
     Automatically determine the best chart type and generate
-    a chart configuration based on the DataFrame structure.
+    a Recharts-compatible chart configuration based on the DataFrame structure.
     No AI call needed — pure logic.
     """
     if df.empty or len(df.columns) < 2:
@@ -526,10 +527,8 @@ def generate_chart_config(df: pd.DataFrame, user_query: str) -> Optional[dict]:
         y_col = num_cols[0]
         chart_type = "bar"
 
-        # If too many categories, use a horizontal bar
+        # If too many categories, still use bar (maybe horizontal later)
         unique_vals = df[x_col].nunique()
-        if unique_vals > 10:
-            chart_type = "bar"
 
         # Pie chart for small category sets (2-6 items)
         if 2 <= unique_vals <= 6:
@@ -537,57 +536,45 @@ def generate_chart_config(df: pd.DataFrame, user_query: str) -> Optional[dict]:
 
         labels  = df[x_col].astype(str).tolist()
         values  = df[y_col].tolist()
-
-        if chart_type == "pie":
-            return {
-                "type": "pie",
-                "data": {
-                    "labels": labels,
-                    "datasets": [{
-                        "data":            values,
-                        "backgroundColor": [
-                            "#6366f1", "#8b5cf6", "#ec4899",
-                            "#f59e0b", "#10b981", "#3b82f6",
-                        ],
-                    }],
-                },
-                "options": {"responsive": True},
-            }
+        
+        # Build Recharts array: [{x_col: label1, y_col: val1}, ...]
+        recharts_data = []
+        for i in range(len(labels)):
+            recharts_data.append({
+                x_col: labels[i],
+                y_col: values[i]
+            })
 
         return {
-            "type": "bar",
-            "data": {
-                "labels": labels,
-                "datasets": [{
-                    "label":           y_col,
-                    "data":            values,
-                    "backgroundColor": "#6366f1",
-                    "borderRadius":    4,
-                }],
-            },
-            "options": {
-                "responsive": True,
-                "plugins":    {"legend": {"display": False}},
-                "scales":     {"y": {"beginAtZero": True}},
-            },
+            "type": chart_type,
+            "data": recharts_data,
+            "x_axis": x_col,
+            "y_axis": y_col,
+            "title": f"{y_col} by {x_col}"
         }
 
     if len(num_cols) >= 2:
-        # Two numeric columns = line or scatter
-        chart_type = "line" if row_count <= 50 else "scatter"
+        # Two numeric columns = area or bar depending on row count
+        chart_type = "area" if row_count > 10 else "bar"
+        x_col = num_cols[0]
+        y_col = num_cols[1]
+        
+        labels = df[x_col].tolist()
+        values = df[y_col].tolist()
+        
+        recharts_data = []
+        for i in range(len(labels)):
+            recharts_data.append({
+                x_col: labels[i],
+                y_col: values[i]
+            })
+
         return {
             "type": chart_type,
-            "data": {
-                "labels": list(range(len(df))),
-                "datasets": [{
-                    "label":       num_cols[1],
-                    "data":        df[num_cols[1]].tolist(),
-                    "borderColor": "#6366f1",
-                    "fill":        False,
-                    "tension":     0.4,
-                }],
-            },
-            "options": {"responsive": True},
+            "data": recharts_data,
+            "x_axis": x_col,
+            "y_axis": y_col,
+            "title": f"{y_col} vs {x_col}"
         }
 
     return None

@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List
 
 import pandas as pd
+import re
 from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
@@ -200,8 +201,10 @@ def upload_dataset(
     Auto-detects all columns and data types.
     Saves schema to dataset_tables + dataset_columns.
     """
-    # Validate dataset name
-    dataset_name = dataset_name.strip()
+    # Validate and sanitize dataset name
+    dataset_name = re.sub(r'[^a-zA-Z0-9_]', '_', dataset_name.strip()).strip('_')
+    if not dataset_name:
+        dataset_name = f"dataset_{uuid.uuid4().hex[:8]}"
     if len(dataset_name) < 3:
         raise HTTPException(400, "Dataset name must be at least 3 characters")
     if len(dataset_name) > 100:
