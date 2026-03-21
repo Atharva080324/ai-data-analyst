@@ -1,5 +1,3 @@
-Got you — I’ll give you a clean, production-grade README.md that actually looks like a serious startup project (not a college repo dump). No overengineering, but covers everything properly.
-
 
 ---
 
