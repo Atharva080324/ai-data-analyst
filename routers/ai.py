@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from services.sql_validator import validate_sql_ast, estimate_query_complexity
 from services.cache import get_cached_sql, cache_sql, get_cached_insights, cache_insights
@@ -714,4 +715,201 @@ def agent_analyze(
         "final_answer":        result.get("final_answer"),
         "execution_time_ms":   result.get("execution_time_ms", 0),
         "error":               result.get("error"),
+        "confidence_score":    result.get("confidence_score"),
+        "generated_code":      result.get("generated_code"),
+        "code_output":         result.get("code_output"),
     }
+
+
+# ════════════════════════════════════════════════════════════════
+# POST /ai/agent/stream   — SSE Stream endpoint
+# ════════════════════════════════════════════════════════════════
+
+@router.post(
+    "/agent/stream",
+    summary="SSE endpoint that streams agent progress and final results",
+)
+def agent_analyze_stream(
+    body:         AgentRequest,
+    current_user: User    = Depends(get_current_user),
+    db:           Session = Depends(get_db),
+):
+    """
+    Streams intermediate states of the LangGraph agent via Server-Sent Events.
+    Events: 'progress' (SQL generated, querying, etc.) and 'complete' (final AgentResponse).
+    """
+    session_uid = validate_uuid(body.session_id, "session ID")
+    dataset_uid = validate_uuid(body.dataset_id, "dataset ID")
+
+    session = db.query(ChatSession).filter(
+        ChatSession.id == session_uid,
+        ChatSession.user_id == current_user.id,
+    ).first()
+    if not session:
+        raise HTTPException(404, "Session not found or access denied")
+
+    dataset = get_dataset_or_403(db, dataset_uid, current_user.id)
+    schema_text = build_schema_text(dataset)
+
+    def event_generator():
+        # Compile agent instance
+        from services.agent import build_agent
+        agent_graph = build_agent()
+        
+        initial_state = {
+            "user_query":          body.user_query,
+            "schema_text":         schema_text,
+            "filtered_schema":     schema_text,
+            "dataset":             dataset,
+            "session_id":          str(session_uid),
+            "session_memory":      "",
+            "route":               "",
+            "plan":                None,
+            "selected_tables":     [],
+            "generated_sql":       None,
+            "reviewed_sql":        None,
+            "sql_explanation":     None,
+            "sql_valid":           False,
+            "sql_attempts":        0,
+            "sql_error":           None,
+            "error_type":          None,
+            "error_strategy":      None,
+            "result_df":           None,
+            "result_rows":         [],
+            "row_count":           0,
+            "result_stats":        {},
+            "result_valid":        False,
+            "result_issue":        None,
+            "scraped_context":     None,
+            "insights":            [],
+            "recommendations":     [],
+            "chart_config":        None,
+            "explanation":         None,
+            "followup_questions":  [],
+            "last_sql":            None,
+            "final_answer":        None,
+            "error":               None,
+            "execution_time_ms":   0,
+        }
+        
+        # Stream intermediate graph states
+        final_state = None
+        for step in agent_graph.stream(initial_state):
+            # step is a dict like {'node_name': {state_updates}}
+            for node_name, state in step.items():
+                final_state = state
+                msg = "Processing..."
+                if node_name == "router":
+                    msg = "Routing query..."
+                elif node_name == "schema_selector":
+                    msg = "Selecting relevant tables..."
+                elif node_name == "generate_sql":
+                    msg = "Writing SQL query..."
+                elif node_name == "execute_sql":
+                    msg = "Executing query..."
+                elif node_name == "generate_python":
+                    msg = "Writing Python script..."
+                elif node_name == "execute_python":
+                    msg = "Executing Python sandbox..."
+                elif node_name == "insights":
+                    msg = "Formulating business insights..."
+                elif node_name == "scrape_web":
+                    msg = "Fetching latest industry news..."
+                elif node_name == "recommendations":
+                    msg = "Generating strategic recommendations..."
+                elif node_name == "chart":
+                    msg = "Designing visualizations..."
+                
+                # Send progress SSE event
+                payload = json.dumps({"status": msg, "node": node_name})
+                yield f"event: progress\ndata: {payload}\n\n"
+        
+        if final_state is None:
+            final_state = initial_state
+            
+        # Compile the final result structure (matches regular /agent response)
+        result = {
+            "route":               final_state.get("route", "sql"),
+            "user_query":          body.user_query,
+            "plan":                final_state.get("plan"),
+            "selected_tables":     final_state.get("selected_tables", []),
+            "generated_sql":       final_state.get("generated_sql"),
+            "reviewed_sql":        final_state.get("reviewed_sql"),
+            "sql_explanation":     final_state.get("sql_explanation"),
+            "sql_valid":           final_state.get("sql_valid", False),
+            "sql_attempts":        final_state.get("sql_attempts", 0),
+            "error_type":          final_state.get("error_type"),
+            "row_count":           final_state.get("row_count", 0),
+            "result_preview":      final_state.get("result_rows", []),
+            "result_stats":        final_state.get("result_stats"),
+            "result_valid":        final_state.get("result_valid", False),
+            "result_issue":        final_state.get("result_issue"),
+            "insights":            final_state.get("insights", []),
+            "recommendations":     final_state.get("recommendations", []),
+            "chart_config":        final_state.get("chart_config"),
+            "followup_questions":  final_state.get("followup_questions", []),
+            "explanation":         final_state.get("explanation"),
+            "final_answer":        final_state.get("final_answer"),
+            "execution_time_ms":   final_state.get("execution_time_ms", 0),
+            "error":               final_state.get("error"),
+            "confidence_score":    final_state.get("confidence_score"),
+            "generated_code":      final_state.get("generated_code"),
+            "code_output":         final_state.get("code_output"),
+        }
+        
+        # Persist to DB if valid sql/python
+        if (result.get("route") in ("sql", "refine", "python")) and result.get("result_rows"):
+            try:
+                # Local session to avoid thread safety issues in generator
+                db_generator = next(get_db())
+                from models import ChatSession, AIQuery, QueryResult, Insight, Recommendation, Visualization
+                # Get the session using local db
+                sess = db_generator.query(ChatSession).filter(ChatSession.id == session_uid).first()
+                if sess:
+                    ai_query = AIQuery(
+                        session_id=session_uid,
+                        user_query=body.user_query,
+                        generated_sql=result.get("generated_sql"),
+                        sql_valid=True,
+                        execution_time_ms=result.get("execution_time_ms", 0),
+                    )
+                    db_generator.add(ai_query)
+                    db_generator.flush()
+
+                    db_generator.add(QueryResult(
+                        query_id=ai_query.id,
+                        result_row_count=result.get("row_count", 0),
+                        result_preview=result.get("result_rows", []),
+                    ))
+
+                    for ins in result.get("insights", []):
+                        db_generator.add(Insight(
+                            query_id=ai_query.id,
+                            insight_text=ins["text"],
+                            importance_score=ins["score"],
+                        ))
+
+                    for rec in result.get("recommendations", []):
+                        db_generator.add(Recommendation(
+                            query_id=ai_query.id,
+                            recommendation_text=rec["text"],
+                            confidence_score=rec["score"],
+                        ))
+
+                    if result.get("chart_config"):
+                        db_generator.add(Visualization(
+                            query_id=ai_query.id,
+                            chart_type=result["chart_config"].get("type", "bar"),
+                            chart_config=result["chart_config"],
+                        ))
+
+                    sess.last_activity = datetime.utcnow()
+                    db_generator.commit()
+            except Exception:
+                pass # Ignoring DB errors in stream
+
+        # Send final completion event
+        payload = json.dumps(result, default=str)
+        yield f"event: complete\ndata: {payload}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

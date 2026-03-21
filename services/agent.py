@@ -86,6 +86,8 @@ from services.utils import (
     build_schema_text,
 )
 
+from services.python_executor import execute_sandboxed
+
 # ── Import hierarchical memory system ─────────────────────────
 from services.memory import (
     write_turn,
@@ -207,6 +209,9 @@ class AgentState(TypedDict):
     final_answer:     Optional[str]
     error:            Optional[str]
     execution_time_ms: int
+    confidence_score: float
+    generated_code:   Optional[str]
+    code_output:      Optional[str]
 
 
 # ════════════════════════════════════════════════════════════════
@@ -584,38 +589,23 @@ def generate_chart_config_smart(df: pd.DataFrame, user_query: str) -> Optional[d
 # ── AGENT 1: Router ───────────────────────────────────────────
 def router_agent(state: AgentState) -> AgentState:
     """
-    Decides: sql or explain.
+    Decides: sql, refine, python, or explain.
     temperature=0.0 for fully deterministic routing.
-    Defaults to 'sql' on any ambiguity — better to run SQL than hallucinate.
     """
     messages = [
         {
             "role": "system",
             "content": (
-                "You are a query router. Reply with ONE word only: 'sql' or 'explain'.\n\n"
-                "Route to 'sql' when the query asks for:\n"
-                "- specific data, records, or numbers from the dataset\n"
-                "- top N / bottom N / highest / lowest / most / least / cheapest / expensive\n"
-                "- count, sum, average, total, percentage, revenue\n"
-                "- comparison, ranking, filtering, grouping, distribution\n"
-                "- trends, charts, show me, list, find, get\n"
-                "- ANY question that can be answered by querying the data\n\n"
-                "Route to 'explain' ONLY when:\n"
-                "- asking what a general concept means (e.g. 'what is machine learning')\n"
-                "- asking how something works in theory with no data needed\n\n"
-                "CRITICAL RULE: When in doubt → always route to 'sql'\n\n"
-                "Examples:\n"
-                "top 3 expensive cars → sql\n"
-                "highest revenue model → sql\n"
-                "cheapest product → sql\n"
-                "show all regions → sql\n"
-                "how many rows → sql\n"
-                "average price by model → sql\n"
-                "best selling model → sql\n"
-                "top 5 salaries → sql\n"
-                "trend over time → sql\n"
-                "what is machine learning → explain\n"
-                "explain what GDP means → explain\n"
+                "You are a query router. Reply with ONE word only: 'sql', 'refine', 'python', or 'explain'.\n\n"
+                "Route to 'refine' when the query MODIFIES previous context:\n"
+                "- Uses pronouns: 'that', 'those', 'it', 'them'\n"
+                "- Uses modifiers: 'add', 'remove', 'filter', 'break down', 'group by', 'except'\n\n"
+                "Route to 'python' when the question CANNOT be answered with SQL:\n"
+                "- Correlations, statistical tests, clustering, specific predictions\n"
+                "- 'What is the correlation between X and Y?', 'Cluster the users'\n\n"
+                "Route to 'explain' ONLY when asking general definitions (e.g., 'what is GDP').\n\n"
+                "Route to 'sql' for ALL OTHER queries asking for data, records, aggregates, or charts.\n\n"
+                "CRITICAL RULE: When in doubt → route to 'sql'.\n"
             ),
         },
         {
@@ -625,16 +615,13 @@ def router_agent(state: AgentState) -> AgentState:
     ]
     try:
         decision = call_groq(messages, max_tokens=10, temperature=0.0)
-        # Strict match: exact word first, then contains fallback
         cleaned = decision.strip().lower()
-        if cleaned in ("sql", "explain"):
-            route = cleaned
-        elif "sql" in cleaned:
-            route = "sql"
-        else:
-            route = "sql"  # default to sql on ambiguity
+        if "refine" in cleaned: route = "refine"
+        elif "python" in cleaned: route = "python"
+        elif "explain" in cleaned: route = "explain"
+        else: route = "sql"
     except Exception:
-        route = "sql"  # always default to sql on failure
+        route = "sql"
     return {**state, "route": route}
 
 
@@ -1486,9 +1473,117 @@ def explain_agent(state: AgentState) -> AgentState:
         return {**state, "explanation": fallback, "final_answer": fallback, "error": str(e)}
 
 
-# ── AGENT 20: Final ───────────────────────────────────────────
+# ── AGENT 20: Python Code Generator ───────────────────────────
+def generate_python_agent(state: AgentState) -> AgentState:
+    """Generates pandas/numpy code for non-SQL tasks."""
+    schema = state["schema_text"][:MAX_SCHEMA_CHARS]
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are an expert Python data analyst.\n"
+                "Write Python code using ONLY pandas and numpy to solve the user's request.\n"
+                "The dataset is already loaded in a DataFrame named `df`.\n"
+                "IMPORTANT RULES:\n"
+                "- Do NOT write `import pandas` or `import numpy`. They are already imported.\n"
+                "- Do NOT load the data. `df` already exists.\n"
+                "- MUST assign the final output to a variable named `result`.\n"
+                "- ONLY use `pandas` (pd) and `numpy` (np). No other libraries.\n"
+                "- Wrap the code in ```python code blocks.\n"
+                f"Dataset schema:\n{schema}"
+            ),
+        },
+        {"role": "user", "content": state["user_query"]},
+    ]
+    try:
+        response = call_groq(messages, max_tokens=512, temperature=0.1)
+        code = re.sub(r"```python|```py|```", "", response, flags=re.DOTALL).strip()
+        return {**state, "generated_code": code}
+    except Exception as e:
+        return {**state, "generated_code": None, "error": f"Failed to generate code: {e}", "route": "mismatch"}
+
+
+# ── AGENT 21: Python Executor ─────────────────────────────────
+def execute_python_agent(state: AgentState) -> AgentState:
+    """Executes generated python code in a sandbox."""
+    code = state.get("generated_code")
+    if not code:
+        return {**state, "code_output": "No code generated.", "error": "No code."}
+    
+    # Needs actual DataFrame
+    df = state["dataset"].get_dataframes().get(state["dataset"].tables[0].table_name) if hasattr(state["dataset"], "get_dataframes") else None
+    if df is None:
+        # Fallback if method is missing but we're in the pipeline
+        try:
+            from routers.datasets import read_file_to_dataframes
+            dfs = read_file_to_dataframes(state["dataset"].file_path, state["dataset"].tables[0].table_name)
+            df = list(dfs.values())[0]
+        except Exception as e:
+            return {**state, "error": f"Failed to load DF: {e}"}
+            
+    res = execute_sandboxed(code, df)
+    
+    error = res.get("error")
+    output = res.get("output")
+    result_val = res.get("result")
+    
+    if error:
+        return {**state, "code_output": output, "error": f"Python Execution Error: {error}"}
+        
+    rows = []
+    if isinstance(result_val, list):
+        rows = result_val
+    elif isinstance(result_val, dict):
+        rows = [result_val]
+        
+    return {
+        **state, 
+        "code_output": output, 
+        "result_rows": rows,
+        "row_count": len(rows),
+        "result_valid": True,
+    }
+
+
+def _compute_confidence(state: AgentState) -> float:
+    """Computes a 0.0 to 1.0 confidence score."""
+    score = 1.0
+    
+    if state.get("error") or state.get("sql_error"):
+        return 0.0
+        
+    route = state.get("route", "")
+    if route not in ("sql", "refine"):
+        return 1.0  # Python and Explain are typically high confidence if no error thrown
+        
+    attempts = state.get("sql_attempts", 1)
+    if attempts > 1:
+        score -= 0.15 * (attempts - 1)
+        
+    rows = state.get("result_rows", [])
+    if not rows:
+        score -= 0.3
+    else:
+        # Check null ratios
+        null_count = 0
+        total_cells = 0
+        for r in rows:
+            for v in r.values():
+                total_cells += 1
+                if v is None:
+                    null_count += 1
+        if total_cells > 0:
+            null_ratio = null_count / total_cells
+            score -= (null_ratio * 0.4) # Deduct up to 0.4 based on null%
+            
+    return max(0.0, min(1.0, score))
+
+
+# ── AGENT 22: Final ───────────────────────────────────────────
 def final_agent(state: AgentState) -> AgentState:
     """Assembles final answer."""
+    state["confidence_score"] = _compute_confidence(state)
+    
     if state.get("route") == "explain":
         return state
 
@@ -1534,7 +1629,12 @@ def route_after_router(state: AgentState) -> str:
     return "memory_retriever"
 
 def route_after_memory(state: AgentState) -> str:
-    return "planning" if state.get("route") == "sql" else "explain"
+    r = state.get("route", "sql")
+    if r in ("sql", "refine"):
+        return "planning"
+    if r == "python":
+        return "generate_python"
+    return "explain"
 
 
 def route_after_planning(state: AgentState) -> str:
@@ -1583,6 +1683,11 @@ def build_agent():
     graph.add_node("execute_sql",     execute_sql_agent)
     graph.add_node("validate_result", result_validator_agent)
     graph.add_node("stats_enricher",  stats_enricher_agent)
+    
+    # Python route
+    graph.add_node("generate_python", generate_python_agent)
+    graph.add_node("execute_python",  execute_python_agent)
+    
     graph.add_node("insights",        insights_agent)
     graph.add_node("scrape_web",      scrape_web_agent)
     graph.add_node("recommendations", recommendations_agent)
@@ -1597,10 +1702,11 @@ def build_agent():
     # Router → memory retriever (always)
     graph.add_edge("router", "memory_retriever")
 
-    # Memory retriever → planning or explain
+    # Memory retriever → planning, generate_python, or explain
     graph.add_conditional_edges("memory_retriever", route_after_memory, {
-        "planning": "planning",
-        "explain":  "explain",
+        "planning":        "planning",
+        "generate_python": "generate_python",
+        "explain":         "explain",
     })
 
     # SQL pipeline: conditional after planning (handles dataset mismatch)
@@ -1632,6 +1738,11 @@ def build_agent():
         "classify_error": "classify_error",
         "final":          "final",
     })
+    
+    # Python pipeline
+    graph.add_edge("generate_python", "execute_python")
+    # Both SQL and Python pipelines merge at insights
+    graph.add_edge("execute_python",  "insights")
 
     # Post-execution pipeline
     graph.add_edge("stats_enricher",  "insights")

@@ -96,6 +96,7 @@ class AnalyzeResponse(BaseModel):
     error:             Optional[str]   = None
     final_answer:      Optional[str]   = None
     followup_questions: List[str]      = []
+    confidence_score:  Optional[float] = None
 
 
 # ── Generic Message ───────────────────────────────────────────
@@ -144,3 +145,6 @@ class AgentResponse(BaseModel):
     final_answer:        Optional[str]       = None
     execution_time_ms:   int                 = 0
     error:               Optional[str]       = None
+    confidence_score:    Optional[float]     = None
+    generated_code:      Optional[str]       = None
+    code_output:         Optional[str]       = None
