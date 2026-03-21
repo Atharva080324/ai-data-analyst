@@ -318,6 +318,8 @@ def build_schema_for_tables(dataset, table_names: List[str]) -> str:
     the LLM sees unquoted column names and generates broken SQL.
     """
     lines = [f"Dataset: {dataset.dataset_name}"]
+    if getattr(dataset, "description", None):
+        lines.append(f"Description: {dataset.description}")
     for table in dataset.tables:
         if table.table_name not in table_names:
             continue
@@ -437,6 +439,18 @@ def generate_chart_config_smart(df: pd.DataFrame, user_query: str) -> Optional[d
 
     if not num_cols:
         return None
+
+    # ── Single-value aggregate (SUM, COUNT, AVG result) → number card ──
+    if len(df) == 1 and num_cols and not str_cols:
+        col = num_cols[0]
+        val = float(df[col].iloc[0])
+        # Derive display label from column alias or name
+        label = col.replace("_", " ").title()
+        return {
+            "type":  "number",
+            "data":  {"value": round(val, 2), "label": label},
+            "options": {"responsive": True},
+        }
 
     # Get intent from user query
     intent = detect_chart_intent(user_query)
@@ -1045,63 +1059,143 @@ def result_validator_agent(state: AgentState) -> AgentState:
 
 
 # ── AGENT 12: Stats Enricher (NEW) ───────────────────────────
+def _detect_query_type(sql: str, row_count: int, df: pd.DataFrame) -> str:
+    """
+    Detect the result shape from the SQL + result dimensions.
+    Returns: "aggregate" | "ranking" | "distribution" | "general"
+    Pure string matching — no LLM call needed.
+    """
+    if not sql:
+        return "general"
+
+    sql_upper = sql.upper()
+    agg_keywords = ["SUM(", "COUNT(", "AVG(", "MAX(", "MIN(", "TOTAL("]
+    has_agg = any(k in sql_upper for k in agg_keywords)
+
+    num_cols = df.select_dtypes(include=["number"]).columns.tolist()
+    str_cols = df.select_dtypes(include=["object", "string"]).columns.tolist()
+
+    # Single-value aggregate: 1 row result from SUM/COUNT/AVG query
+    if row_count == 1 and has_agg:
+        return "aggregate"
+
+    # Ranking: small result set with ORDER BY + LIMIT (top-N / bottom-N)
+    if row_count <= 20 and str_cols and num_cols:
+        if "ORDER BY" in sql_upper:
+            return "ranking"
+
+    # Distribution: larger result set with numeric data
+    if row_count > 20 and num_cols:
+        return "distribution"
+
+    return "general"
+
+
 def stats_enricher_agent(state: AgentState) -> AgentState:
     """
-    NEW: Computes quantitative statistics from results.
-    Feeds into insights so they use actual numbers.
-
-    Computes: mean, median, min, max, % of dataset total for numeric cols.
+    Computes context-aware statistics based on result shape.
+    Detects aggregate / ranking / distribution queries and produces
+    appropriate stats — avoids nonsensical min/max/mean on single-row aggregates.
     """
     df = state.get("result_df")
     if df is None or df.empty:
-        return {**state, "result_stats": {}}
+        return {**state, "result_stats": {"_query_type": "empty"}}
 
-    stats   = {}
-    # Fix #3: safe table access — no IndexError on empty tables
-    tables        = safe_tables(state)
+    sql = state.get("generated_sql", "")
+    query_type = _detect_query_type(sql, state["row_count"], df)
+
+    stats = {"_query_type": query_type}
+    tables = safe_tables(state)
     total_dataset = tables[0].row_count if tables and tables[0].row_count else 1
 
-    for col in df.select_dtypes(include=["number"]).columns:
-        try:
-            col_sum = float(df[col].sum())
-            stats[col] = {
-                "mean":            round(float(df[col].mean()), 2),
-                "median":          round(float(df[col].median()), 2),
-                "min":             round(float(df[col].min()), 2),
-                "max":             round(float(df[col].max()), 2),
-                "sum":             round(col_sum, 2),
-                "pct_of_dataset":  round(state["row_count"] / total_dataset * 100, 1),
-            }
-        except Exception:
-            pass
+    num_cols = df.select_dtypes(include=["number"]).columns.tolist()
+    str_cols = df.select_dtypes(include=["object", "string"]).columns.tolist()
 
-    # Add ranking context with PRE-COMPUTED percentages
-    # This prevents the LLM from doing incorrect percentage calculations
-    if state["row_count"] <= 20 and len(df.columns) >= 2:
-        str_cols = df.select_dtypes(include=["object", "string"]).columns.tolist()
-        num_cols = df.select_dtypes(include=["number"]).columns.tolist()
+    # ── Aggregate: single-value result (SUM, COUNT, AVG, etc.) ──
+    if query_type == "aggregate":
+        for col in num_cols:
+            try:
+                val = float(df[col].iloc[0])
+                # Derive unit hint from column name
+                col_lower = col.lower()
+                unit = "million copies" if "sales" in col_lower else ""
+                if "score" in col_lower:
+                    unit = "out of 10"
+                if "count" in col_lower or "total" in col.lower().replace("sales", ""):
+                    unit = ""
+
+                stats[col] = {
+                    "value": round(val, 2),
+                    "unit_hint": unit,
+                }
+            except Exception:
+                pass
+
+        stats["_context"] = {
+            "total_dataset_rows": total_dataset,
+            "result_description": "single aggregated value",
+        }
+
+    # ── Ranking: top-N / bottom-N with labels ──
+    elif query_type == "ranking":
+        # Per-column stats only where meaningful (multiple distinct values)
+        for col in num_cols:
+            try:
+                if df[col].nunique() > 1:
+                    stats[col] = {
+                        "mean":   round(float(df[col].mean()), 2),
+                        "median": round(float(df[col].median()), 2),
+                        "min":    round(float(df[col].min()), 2),
+                        "max":    round(float(df[col].max()), 2),
+                        "sum":    round(float(df[col].sum()), 2),
+                    }
+            except Exception:
+                pass
+
+        # Pre-compute per-row share % so LLM never calculates it
         if str_cols and num_cols:
             col_total = float(df[num_cols[0]].sum())
-
-            # Pre-compute per-row share % so LLM never calculates it
             rankings = []
             for _, row in df.iterrows():
-                val  = float(row[num_cols[0]])
+                val = float(row[num_cols[0]])
                 share = round(val / col_total * 100, 1) if col_total > 0 else 0
                 rankings.append({
-                    "label":    str(row[str_cols[0]]),
-                    "value":    round(val, 2),
+                    "label":     str(row[str_cols[0]]),
+                    "value":     round(val, 2),
                     "share_pct": share,
                 })
 
             stats["_rankings"] = rankings
+            gap = round(rankings[0]["value"] - rankings[1]["value"], 2) if len(rankings) >= 2 else 0
             stats["_context"] = {
-                "top_item":    rankings[0]["label"] if rankings else "",
-                "top_value":   rankings[0]["value"] if rankings else 0,
-                "top_share":   rankings[0]["share_pct"] if rankings else 0,
-                "total":       round(col_total, 2),
-                "result_rows": state["row_count"],
+                "top_item":       rankings[0]["label"] if rankings else "",
+                "top_value":      rankings[0]["value"] if rankings else 0,
+                "top_share":      rankings[0]["share_pct"] if rankings else 0,
+                "gap_to_second":  gap,
+                "total":          round(col_total, 2),
+                "result_rows":    state["row_count"],
             }
+
+    # ── Distribution / General: full descriptive stats ──
+    else:
+        for col in num_cols:
+            try:
+                col_sum = float(df[col].sum())
+                stats[col] = {
+                    "mean":           round(float(df[col].mean()), 2),
+                    "median":         round(float(df[col].median()), 2),
+                    "min":            round(float(df[col].min()), 2),
+                    "max":            round(float(df[col].max()), 2),
+                    "sum":            round(col_sum, 2),
+                    "pct_of_dataset": round(state["row_count"] / total_dataset * 100, 1),
+                }
+                # Add percentiles for distributions
+                if query_type == "distribution":
+                    stats[col]["p25"] = round(float(df[col].quantile(0.25)), 2)
+                    stats[col]["p75"] = round(float(df[col].quantile(0.75)), 2)
+                    stats[col]["std"] = round(float(df[col].std()), 2)
+            except Exception:
+                pass
 
     return {**state, "result_stats": stats}
 
@@ -1109,14 +1203,54 @@ def stats_enricher_agent(state: AgentState) -> AgentState:
 # ── AGENT 13: Insights ────────────────────────────────────────
 def insights_agent(state: AgentState) -> AgentState:
     """
-    Generates quantitative insights.
-    Uses result_stats to enforce actual numbers in every insight.
+    Generates quantitative insights using result-type-aware prompts.
+    Different prompt strategies for aggregate, ranking, and distribution results.
     """
     if not state.get("result_rows"):
         return {**state, "insights": []}
 
     sample = json.dumps(state["result_rows"][:20], default=str)
-    stats  = json.dumps(state.get("result_stats", {}), default=str)
+    result_stats = state.get("result_stats", {})
+    stats_json = json.dumps(result_stats, default=str)
+    query_type = result_stats.get("_query_type", "general")
+
+    # ── Select prompt based on query type ──
+    if query_type == "aggregate":
+        type_instructions = (
+            "CRITICAL: The result is a SINGLE AGGREGATED VALUE (e.g., a SUM, COUNT, or AVERAGE).\n"
+            "- Do NOT report 'min, max, mean, median' — this is a single value, those are meaningless.\n"
+            "- Do NOT repeat the same number in all 3 insights with different wording.\n"
+            "- The stats JSON contains the value and a 'unit_hint' — USE the unit (e.g., 'million copies').\n\n"
+            "Instead, generate 3 DIFFERENT and USEFUL insights:\n"
+            "1. State the result clearly with its correct unit, and what it represents.\n"
+            "2. Provide broader context — compare to dataset totals, time span, or industry norms if obvious.\n"
+            "3. Highlight what makes this notable — is it high/low? What does the SQL WHERE clause filter on?\n"
+        )
+    elif query_type == "ranking":
+        type_instructions = (
+            "The result is a RANKING (top-N or bottom-N list).\n"
+            "- The stats contain pre-computed 'share_pct' and 'gap_to_second' — USE these exact values.\n"
+            "- Do NOT recalculate percentages yourself.\n\n"
+            "Generate 3 insights:\n"
+            "1. Highlight the #1 item: name, value, and its share percentage.\n"
+            "2. Compare #1 vs #2 — mention the gap between them.\n"
+            "3. Identify a pattern or outlier in the full ranking (e.g., concentration at top, long tail).\n"
+        )
+    elif query_type == "distribution":
+        type_instructions = (
+            "The result is a DISTRIBUTION (many rows with numeric data).\n"
+            "- Use the descriptive statistics (mean, median, p25, p75, std) from the stats JSON.\n\n"
+            "Generate 3 insights:\n"
+            "1. Central tendency: what is the typical value? (mean vs median — note skew if different)\n"
+            "2. Spread: what is the range? Are there outliers?\n"
+            "3. A notable pattern in the data (clusters, gaps, trends).\n"
+        )
+    else:
+        type_instructions = (
+            "Generate 3 data-driven insights.\n"
+            "- Every insight MUST contain at least one REAL number from the results.\n"
+            "- Reference the user's actual question in every insight.\n"
+        )
 
     messages = [
         {
@@ -1125,12 +1259,12 @@ def insights_agent(state: AgentState) -> AgentState:
                 "You are a business intelligence analyst.\n"
                 "Generate exactly 3 data-driven insights.\n\n"
                 "STRICT RULES:\n"
-                "- Every insight MUST contain at least one REAL number from the results or stats below.\n"
                 "- ONLY use numbers that appear in the sample results or stats JSON — NEVER invent values.\n"
-                "- Do NOT copy example numbers from these instructions — use ONLY the actual query data.\n"
-                "- Be specific: reference actual values from the result rows.\n"
-                "- Reference the user's actual question in every insight.\n"
-                "- If a stat is not in the data, do not mention it.\n\n"
+                "- Do NOT produce repetitive insights that just reword the same fact.\n"
+                "- Each insight must provide DIFFERENT information.\n"
+                "- Be specific: reference actual values from the data.\n"
+                "- If stats contain a 'unit_hint', always include the unit (e.g., 'million copies').\n\n"
+                f"{type_instructions}\n"
                 "Respond ONLY with JSON array:\n"
                 '[{"insight": "...", "importance": 0.9}, ...]'
             ),
@@ -1141,16 +1275,16 @@ def insights_agent(state: AgentState) -> AgentState:
                 f"User question: {state['user_query']}\n"
                 f"SQL executed: {state.get('generated_sql', '')}\n"
                 f"Total rows returned: {state['row_count']}\n\n"
-                f"Pre-computed statistics (use these EXACT numbers, do not recalculate):\n{stats}\n\n"
-                f"Raw result rows (do not calculate percentages from these — use stats above):\n{sample}\n\n"
-                "Generate 3 insights using ONLY the numbers in the pre-computed statistics above."
+                f"Pre-computed statistics (use these EXACT numbers, do not recalculate):\n{stats_json}\n\n"
+                f"Raw result rows:\n{sample}\n\n"
+                "Generate 3 DIFFERENT insights — each must add new information."
             ),
         },
     ]
     try:
-        response = call_groq(messages, max_tokens=600, temperature=0.2)
+        response = call_groq(messages, max_tokens=600, temperature=0.3)
         clean    = re.sub(r"```.*?```", "", response, flags=re.DOTALL).strip()
-        data     = safe_json_extract(clean)   # Fix #7: robust JSON extraction
+        data     = safe_json_extract(clean)
         if data:
             insights = [
                 {"text": d.get("insight", ""), "score": float(d.get("importance", 0.5))}
@@ -1182,7 +1316,10 @@ def scrape_web_agent(state: AgentState) -> AgentState:
 
 # ── AGENT 15: Recommendations ─────────────────────────────────
 def recommendations_agent(state: AgentState) -> AgentState:
-    """Recommendations backed by data + insights + real news."""
+    """
+    Recommendations grounded in actual data, not just insight text.
+    Receives raw result rows, SQL, stats, and insights for full context.
+    """
     if not state.get("insights"):
         return {**state, "recommendations": []}
 
@@ -1192,13 +1329,22 @@ def recommendations_agent(state: AgentState) -> AgentState:
     if scraped_context:
         web_section = f"\nCurrent industry news:\n{scraped_context}\n"
 
+    # Include raw data context so recommendations are grounded
+    result_sample = json.dumps(state.get("result_rows", [])[:10], default=str)
+    stats_json    = json.dumps(state.get("result_stats", {}), default=str)
+
     messages = [
         {
             "role": "system",
             "content": (
                 "You are a strategic business consultant.\n"
-                "Give exactly 3 specific, actionable recommendations.\n"
-                "Each must reference specific numbers from the insights.\n"
+                "Give exactly 3 specific, actionable recommendations.\n\n"
+                "STRICT RULES:\n"
+                "- Each recommendation must reference specific numbers from the data.\n"
+                "- Recommend ACTIONS the user can take based on this data.\n"
+                "- NEVER suggest 'collect more data', 'use a larger dataset', or 'invest in better data'.\n"
+                "- NEVER describe the data as a 'single data point' or 'outlier' when it is an aggregated result.\n"
+                "- Focus on analysis directions, business decisions, or deeper exploration of the existing data.\n"
                 f"{web_section}\n"
                 "Respond ONLY with JSON array:\n"
                 '[{"recommendation": "...", "confidence": 0.9}, ...]'
@@ -1208,7 +1354,10 @@ def recommendations_agent(state: AgentState) -> AgentState:
             "role": "user",
             "content": (
                 f"Question: {state['user_query']}\n"
+                f"SQL used: {state.get('generated_sql', '')}\n"
                 f"Insights:\n{insights_text}\n"
+                f"Stats: {stats_json}\n"
+                f"Result data sample: {result_sample}\n"
                 f"Rows analyzed: {state.get('row_count', 0)}"
             ),
         },
@@ -1216,7 +1365,7 @@ def recommendations_agent(state: AgentState) -> AgentState:
     try:
         response = call_groq(messages, max_tokens=512, temperature=0.3)
         clean    = re.sub(r"```.*?```", "", response, flags=re.DOTALL).strip()
-        data     = safe_json_extract(clean)   # Fix #7
+        data     = safe_json_extract(clean)
         if data:
             recs = [
                 {"text": d.get("recommendation", ""), "score": float(d.get("confidence", 0.5))}

@@ -120,6 +120,9 @@ def build_schema_text(dataset) -> str:
         f"Database dialect: DuckDB",
         f"Dataset: {dataset.dataset_name}",
     ]
+    # Include user-provided dataset description if available
+    if getattr(dataset, "description", None):
+        lines.append(f"Description: {dataset.description}")
     for table in dataset.tables:
         row_str = f"{table.row_count:,}" if table.row_count else "unknown"
         lines.append(f"\nTable: {table.table_name}  ({row_str} rows)")
