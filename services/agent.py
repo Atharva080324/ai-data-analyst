@@ -1497,7 +1497,13 @@ def generate_python_agent(state: AgentState) -> AgentState:
     ]
     try:
         response = call_groq(messages, max_tokens=512, temperature=0.1)
-        code = re.sub(r"```python|```py|```", "", response, flags=re.DOTALL).strip()
+        match = re.search(r"```(?:python|py)?(.*?)```", response, flags=re.DOTALL | re.IGNORECASE)
+        if match:
+            code = match.group(1).strip()
+        else:
+            # Fallback if no code block tags are used
+            code = response.strip()
+            
         return {**state, "generated_code": code}
     except Exception as e:
         return {**state, "generated_code": None, "error": f"Failed to generate code: {e}", "route": "mismatch"}
@@ -1516,7 +1522,8 @@ def execute_python_agent(state: AgentState) -> AgentState:
         # Fallback if method is missing but we're in the pipeline
         try:
             from routers.datasets import read_file_to_dataframes
-            dfs = read_file_to_dataframes(state["dataset"].file_path, state["dataset"].tables[0].table_name)
+            from pathlib import Path
+            dfs = read_file_to_dataframes(Path(state["dataset"].file_path), state["dataset"].tables[0].table_name)
             df = list(dfs.values())[0]
         except Exception as e:
             return {**state, "error": f"Failed to load DF: {e}"}

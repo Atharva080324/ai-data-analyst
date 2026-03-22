@@ -30,22 +30,22 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # Restrict imports
-_ALLOWED_MODULES = {"pandas", "numpy", "json", "math", "statistics", "collections"}
+_BANNED_MODULES = {{"os", "sys", "subprocess", "shutil", "socket", "urllib", "requests", "http"}}
 _original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
 
 def _restricted_import(name, *args, **kwargs):
     top_level = name.split(".")[0]
-    if top_level not in _ALLOWED_MODULES:
-        raise ImportError(f"Import '{name}' is not allowed. Only: {', '.join(sorted(_ALLOWED_MODULES))}")
+    if top_level in _BANNED_MODULES:
+        raise ImportError(f"Import '{{name}}' is not allowed for security reasons.")
     return _original_import(name, *args, **kwargs)
+
+import pandas as pd
+import numpy as np
 
 try:
     __builtins__.__import__ = _restricted_import
 except AttributeError:
     pass
-
-import pandas as pd
-import numpy as np
 
 # Load the dataset
 df = pd.read_json(sys.argv[1])
@@ -107,7 +107,7 @@ def execute_sandboxed(
     data_file = None
     try:
         data_file = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False, prefix="analyst_"
+            mode="w", suffix=".json", delete=False, prefix="analyst_", encoding="utf-8"
         )
         # Limit to 10k rows for safety
         df.head(10000).to_json(data_file.name, orient="records", default_handler=str)
@@ -116,16 +116,22 @@ def execute_sandboxed(
         script = _CODE_TEMPLATE.format(user_code=code)
 
         script_file = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False, prefix="analyst_script_"
+            mode="w", suffix=".py", delete=False, prefix="analyst_script_", encoding="utf-8"
         )
         script_file.write(script)
         script_file.close()
+
+        import os
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
 
         # Execute in subprocess
         result = subprocess.run(
             [sys.executable, script_file.name, data_file.name],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env=env,
             timeout=timeout,
             cwd=tempfile.gettempdir(),  # restrict working directory
         )
@@ -139,10 +145,8 @@ def execute_sandboxed(
         if result.returncode != 0:
             # Extract meaningful error from stderr
             stderr = result.stderr.strip()
-            # Get last line (usually the actual error)
-            error_lines = stderr.split("\n")
-            error_msg = error_lines[-1] if error_lines else "Unknown error"
-            return {"output": "", "result": None, "error": error_msg}
+            # Temporary: expose full stderr to debug SyntaxError
+            return {"output": "", "result": None, "error": stderr}
 
         # Parse JSON output from stdout
         stdout = result.stdout.strip()
