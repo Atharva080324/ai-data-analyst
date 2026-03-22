@@ -89,9 +89,11 @@ class DatasetDetailResponse(BaseModel):
 
 # ── Upload Success ────────────────────────────────────────────
 class UploadSuccessResponse(BaseModel):
-    message:    str
-    dataset_id: UUID
-    tables:     List[TableResponse] = []
+    message:              str
+    dataset_id:           UUID
+    tables:               List[TableResponse]    = []
+    profile:              Optional[dict]         = None
+    suggested_questions:  Optional[List[str]]    = None
 
 
 # ── Generic Message ───────────────────────────────────────────

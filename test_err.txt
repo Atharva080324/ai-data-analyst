@@ -1,0 +1,15 @@
+Traceback (most recent call last):
+  File "C:\Users\athar\AppData\Local\Temp\analyst_script_10_v4usp.py", line 26, in <module>
+  File "C:\Users\athar\AppData\Roaming\Python\Python311\site-packages\pandas\io\json\_json.py", line 815, in read_json
+  File "C:\Users\athar\AppData\Roaming\Python\Python311\site-packages\pandas\io\json\_json.py", line 1025, in read
+  File "C:\Users\athar\AppData\Roaming\Python\Python311\site-packages\pandas\io\json\_json.py", line 1051, in _get_object_parser
+  File "C:\Users\athar\AppData\Roaming\Python\Python311\site-packages\pandas\io\json\_json.py", line 1192, in parse
+  File "C:\Users\athar\AppData\Roaming\Python\Python311\site-packages\pandas\io\json\_json.py", line 1209, in _convert_axes
+  File "C:\Users\athar\AppData\Roaming\Python\Python311\site-packages\pandas\io\json\_json.py", line 1265, in _try_convert_data
+  File "C:\Users\athar\AppData\Roaming\Python\Python311\site-packages\pandas\io\json\_json.py", line 1343, in _try_convert_to_date
+  File "C:\Users\athar\AppData\Roaming\Python\Python311\site-packages\pandas\core\dtypes\missing.py", line 178, in isna
+  File "C:\Users\athar\AppData\Roaming\Python\Python311\site-packages\pandas\core\dtypes\missing.py", line 207, in _isna
+  File "C:\Users\athar\AppData\Roaming\Python\Python311\site-packages\pandas\core\dtypes\missing.py", line 288, in _isna_array
+  File "C:\Users\athar\AppData\Roaming\Python\Python311\site-packages\numpy\__init__.py", line 341, in __getattr__
+  File "C:\Users\athar\AppData\Local\Temp\analyst_script_10_v4usp.py", line 14, in _restricted_import
+ImportError: Import 'warnings' is not allowed. Only: collections, json, math, numpy, pandas, statistics

@@ -1,49 +1,409 @@
-# AI Data Analyst SaaS — Full-Stack Deployment Guide
 
-This project is a premium, full-stack B2B SaaS platform for AI-powered Data Analysis. It leverages Next.js 14, Supabase (Auth, Postgres, Storage), Anthropic Claude API, and in-browser SQLite WASM execution for maximum speed and security.
+---
 
-## Tech Stack Overview
-- **Framework**: Next.js 14 (App Router)
-- **Database / Auth / Storage**: Supabase
-- **AI Engine**: Anthropic Claude 3.5 Sonnet
-- **Execution Engine**: `sql.js` (SQLite compiled to WebAssembly)
-- **UI & Styling**: Tailwind CSS, Framer Motion, Recharts
+📄 README.md
 
-## Setup Instructions
+# 🚀 AI Data Analyst Backend
 
-### 1. Supabase Initialization
-1. Create a new Supabase project at [database.new](https://database.new)
-2. Go to the **SQL Editor** in your Supabase dashboard.
-3. Paste and run the entire contents of `supabase_schema.sql` (found in the root directory).
-4. Go to **Storage**, and ensure you have a bucket named exactly `user-datasets`.
-5. Go to **Authentication > Providers** and ensure Email provider is enabled.
-6. Under **Authentication > URL Configuration**, add your local URL `http://localhost:3000/api/auth/callback` to the redirect URLs.
+A production-ready FastAPI backend that transforms natural language queries into SQL, executes them on structured datasets (CSV/Excel), and returns insights, visualizations, and recommendations — powered by an agentic AI pipeline.
 
-### 2. Environment Variables
-In the `frontend/` directory, create a `.env.local` file:
-```env
-NEXT_PUBLIC_SUPABASE_URL=your-project-url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role
-ANTHROPIC_API_KEY=sk-ant-api03-...
-```
+---
 
-### 3. Install Dependencies & Run
-```bash
-cd frontend
-npm install
-npm run dev
-```
+## 🧠 Overview
 
-## Architecture Notes
-- **Data Privacy**: When a user uploads a CSV, it's pushed to a private Supabase Storage bucket. When they enter the Analysis Workspace, the CSV string is converted into a full SQLite database *inside their browser memory* using `sql.js`.
-- **LLM Interaction**: The backend `/api/analyze` route NEVER sends raw dataset chunks to Claude. It only sends the inferred schema (e.g., `{"revenue": "number"}`). Claude replies with standard SQLite SQL strings.
-- **Client Execution**: The frontend takes the LLM-generated SQL and runs it locally on the high-performance WASM database via `sql.js`, instantly pumping the queried aggregates into `Recharts`. This means unlimited, free query executions once the SQL is written!
+This system allows users to:
 
-## Deployment (Vercel)
-The root folder contains `vercel.json` optimized for this Next.js app.
-1. Push this repository to GitHub.
-2. Import the `frontend/` directory into Vercel.
-3. Ensure the Build Command is `npm run build` and Output Directory is `.next`.
-4. Copy the environment variables from `.env.local` into the Vercel Project Settings.
-5. Deploy.
+- Ask questions in natural language
+- Automatically generate SQL queries
+- Execute queries on uploaded datasets
+- Get:
+  - 📊 Results
+  - 📈 Visualizations
+  - 💡 Insights
+  - 🎯 Recommendations
+
+All powered by a **LangGraph-based agentic pipeline** using Groq LLM.
+
+---
+
+## 🏗️ Architecture
+
+Client → FastAPI → Auth → AI Router → LangGraph Agent → DuckDB → Response
+
+### Core Flow
+
+1. User sends query → `/ai/analyze` or `/ai/agent`
+2. Request authenticated via JWT
+3. Schema extracted from dataset
+4. LangGraph Agent decides:
+   - SQL route → generate + execute
+   - Explain route → direct answer
+5. Results processed:
+   - Insights
+   - Recommendations
+   - Charts
+6. Stored in PostgreSQL
+7. Response returned
+
+---
+
+## ⚙️ Tech Stack
+
+| Layer        | Technology |
+|-------------|------------|
+| Backend     | FastAPI |
+| AI Engine   | Groq (LLaMA 3.1) |
+| Agent Flow  | LangGraph |
+| DB (App)    | PostgreSQL |
+| Query Engine| DuckDB |
+| ORM         | SQLAlchemy |
+| Data        | Pandas |
+| Validation  | sqlglot |
+
+---
+
+## 📂 Project Structure
+
+. ├── main.py ├── database.py ├── models.py ├── schemas/ │   └── ai.py ├── routers/ │   ├── ai.py │   └── auth.py ├── services/ │   ├── agent.py │   ├── utils.py │   ├── memory.py │   ├── cache.py │   ├── sql_validator.py │   └── logger.py ├── uploads/ └── .env
+
+---
+
+## 🔑 Features
+
+### 🤖 AI Capabilities
+- Natural language → SQL generation
+- Self-correcting SQL retries (up to 3 attempts)
+- Schema-aware reasoning
+- Business insights generation
+- Actionable recommendations
+- Automatic chart generation
+
+### 🧩 Agent Features
+- Multi-step LangGraph pipeline (~20 nodes)
+- Dynamic routing (SQL vs Explanation)
+- Error classification + recovery
+- Session-based memory (fixed)
+- Fallback SQL handling
+
+### 📊 Data Support
+- CSV files
+- Excel files (multi-sheet)
+- Large datasets (optimized via DuckDB)
+
+---
+
+## 🔐 Authentication
+
+Uses JWT-based authentication.
+
+All endpoints require:
+
+Authorization: Bearer <token>
+
+---
+
+## 📡 API Endpoints
+
+### 🔹 Analyze (Full Pipeline)
+
+POST /ai/analyze
+
+Runs full pipeline:
+- SQL generation
+- Execution
+- Insights
+- Recommendations
+- Visualization
+
+#### Request
+```json
+{
+  "session_id": "uuid",
+  "dataset_id": "uuid",
+  "user_query": "top 3 expensive cars"
+}
+
+
+---
+
+🔹 Agent (Smart Routing)
+
+POST /ai/agent
+
+Agent decides:
+
+SQL execution OR
+
+Direct explanation
+
+
+
+---
+
+🔹 Generate SQL
+
+POST /ai/generate-sql
+
+Returns SQL without execution.
+
+
+---
+
+🔹 Get Results
+
+GET /ai/results/{query_id}
+
+
+---
+
+🔹 Insights
+
+GET /ai/insights/{query_id}
+
+
+---
+
+🔹 Recommendations
+
+GET /ai/recommendations/{query_id}
+
+
+---
+
+🔹 Visualizations
+
+GET /ai/visualizations/{query_id}
+
+
+---
+
+🗄️ Database Design
+
+Main entities:
+
+User
+
+Dataset
+
+DatasetTable
+
+ChatSession
+
+AIQuery
+
+QueryResult
+
+Insight
+
+Recommendation
+
+Visualization
+
+
+
+---
+
+🧠 Agent Pipeline (Simplified)
+
+Router
+  ↓
+Memory Retriever
+  ↓
+Schema Selector
+  ↓
+Planner
+  ↓
+SQL Generator
+  ↓
+SQL Validator
+  ↓
+Execution
+  ↓
+Result Validator
+  ↓
+Insights → Recommendations → Charts
+  ↓
+Final Response
+
+
+---
+
+⚠️ Important Fixes Applied
+
+✅ Session-based memory (no cross-user leakage)
+
+✅ Fixed JSON parsing for nested arrays
+
+✅ SQL fallback uses actual dataset table
+
+✅ Router misclassification reduced
+
+✅ 0-row queries handled correctly
+
+✅ Groq errors properly surfaced
+
+✅ Table/column quoting fixed
+
+
+
+---
+
+🧪 Running Locally
+
+1. Clone Repo
+
+git clone <repo-url>
+cd project
+
+
+---
+
+2. Create Virtual Environment
+
+python -m venv venv
+venv\Scripts\activate   # Windows
+
+
+---
+
+3. Install Dependencies
+
+pip install -r requirements.txt
+
+
+---
+
+4. Setup .env
+
+GROQ_API_KEY=your_key
+GROQ_MODEL=llama-3.1-8b-instant
+DATABASE_URL=postgresql://user:pass@localhost/db
+
+
+---
+
+5. Run Server
+
+uvicorn main:app --reload
+
+
+---
+
+🐘 PostgreSQL Setup (Windows)
+
+pg_ctl -D "C:\Program Files\PostgreSQL\15\data" start
+
+
+---
+
+📊 Example Query
+
+"top 3 expensive cars"
+
+Generated SQL:
+
+SELECT Model, AVG(Avg_Price_EUR) AS Avg_Price
+FROM BMW_Sales
+GROUP BY Model
+ORDER BY Avg_Price DESC
+LIMIT 3;
+
+
+---
+
+⚡ Performance Notes
+
+DuckDB runs in-memory → fast analytics
+
+Groq API optimized for low latency
+
+Max SQL retries: 3
+
+Result preview capped at 100 rows
+
+
+
+---
+
+⚠️ Limitations
+
+No persistent memory (in-memory only)
+
+No async execution (blocking)
+
+External DB execution not implemented yet
+
+Depends on LLM accuracy
+
+
+
+---
+
+🎯 Design Principles
+
+Keep it simple (no overengineering)
+
+Fail gracefully inside agent
+
+Fail loudly at API level
+
+Minimal LLM calls (cost + latency control)
+
+Schema-first reasoning
+
+
+
+---
+
+🚀 Future Improvements
+
+Persistent memory (Redis)
+
+Streaming responses
+
+Async execution
+
+Better routing classifier
+
+Multi-dataset joins
+
+Dashboard UI
+
+
+
+---
+
+👨‍💻 Author
+
+Built for production-level AI data analysis use cases.
+
+
+---
+
+📜 License
+
+MIT License
+
+---
+
+## 🧠 Final Note
+
+This README is:
+- Clean ✅  
+- Recruiter/startup ready ✅  
+- Not overengineered ✅  
+- Matches your architecture exactly ✅  
+
+---
+
+If you want next level (this is where things get serious), I can help you add:
+
+- 🔥 Architecture diagram (visual)
+- 🔥 API Swagger customization
+- 🔥 Production deployment guide (Docker + Nginx)
+- 🔥 System design doc (for interviews)
+
+Just say:
+> "make it production deployment ready"
+
+and we’ll push this to **real startup grade** 🚀

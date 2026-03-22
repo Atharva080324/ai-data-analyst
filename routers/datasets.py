@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, s
 from database import get_db
 from models import User, Dataset, DatasetTable, DatasetColumn
 from routers.auth import get_current_user
+from services.profiler import generate_profile, generate_suggested_questions
 from schemas.datasets import (
     DatasetDetailResponse,
     DatasetSummaryResponse,
@@ -270,10 +271,24 @@ def upload_dataset(
         file_path.unlink(missing_ok=True)
         raise HTTPException(500, "Failed to save dataset. Please try again.")
 
+    # Generate profile + suggested questions (non-blocking: failures don't crash upload)
+    profile = None
+    suggested_questions = None
+    try:
+        profile = generate_profile(dataframes)
+    except Exception:
+        pass
+    try:
+        suggested_questions = generate_suggested_questions(dataset)
+    except Exception:
+        pass
+
     return {
-        "message":    f"'{dataset_name}' uploaded successfully",
-        "dataset_id": dataset.id,
-        "tables":     dataset.tables,
+        "message":             f"'{dataset_name}' uploaded successfully",
+        "dataset_id":          dataset.id,
+        "tables":              dataset.tables,
+        "profile":             profile,
+        "suggested_questions": suggested_questions,
     }
 
 
@@ -374,6 +389,10 @@ def connect_database(
     except Exception:
         db.rollback()
         raise HTTPException(500, "Failed to save schema. Please try again.")
+    finally:
+        # BUG FIX (MEDIUM): ext_engine was never disposed — left a connection
+        # pool open for the external DB after the request completed.
+        ext_engine.dispose()
 
     return {
         "message":    f"'{body.dataset_name}' connected successfully",
@@ -431,6 +450,46 @@ def get_dataset(
 ):
     """Returns full dataset details including all tables and columns."""
     return get_dataset_or_404(db, dataset_id, current_user.id)
+
+
+# ════════════════════════════════════════════════════════════════
+# GET /datasets/{dataset_id}/profile
+# ════════════════════════════════════════════════════════════════
+@router.get(
+    "/{dataset_id}/profile",
+    summary="Get statistical profile of a dataset",
+)
+def get_dataset_profile(
+    dataset_id:   str,
+    current_user: User    = Depends(get_current_user),
+    db:           Session = Depends(get_db),
+):
+    """
+    Regenerates and returns the statistical profile for a dataset.
+    Re-reads the file from disk and computes fresh stats.
+    """
+    ds = get_dataset_or_404(db, dataset_id, current_user.id)
+
+    if not ds.file_path:
+        raise HTTPException(422, "Dataset has no file — only file-based datasets support profiling")
+
+    file_path = Path(ds.file_path)
+    if not file_path.exists():
+        raise HTTPException(404, "Dataset file not found on disk. Please re-upload.")
+
+    # Use the table name from DB (not the UUID filename)
+    table_name = ds.tables[0].table_name if ds.tables else ds.dataset_name
+    try:
+        dataframes = read_file_to_dataframes(file_path, table_name=table_name)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+    profile = generate_profile(dataframes)
+    return {
+        "dataset_id":   str(ds.id),
+        "dataset_name": ds.dataset_name,
+        "profile":      profile,
+    }
 
 
 # ════════════════════════════════════════════════════════════════

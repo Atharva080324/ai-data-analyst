@@ -1,20 +1,42 @@
 # Environment variables — NEVER push this
 .env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
 .Python
-*.egg-info/
-dist/
 build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
 # Virtual environment
 .venv/
 venv/
 env/
+ENV/
+
+# Pytest / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Uploaded files — don't push user data
 uploads/
@@ -22,10 +44,22 @@ uploads/
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # OS
 .DS_Store
 Thumbs.db
 
 # Logs
+logs/
 *.log
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+
+# uv tool
+.uv/

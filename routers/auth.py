@@ -1,5 +1,5 @@
 import os
-import random
+import secrets
 import hashlib
 import bcrypt
 from datetime import datetime, timedelta
@@ -73,8 +73,13 @@ def verify_password(plain: str, hashed: str) -> bool:
 # ════════════════════════════════════════════════════════════════
 
 def generate_otp() -> str:
-    """Generate a random 6-digit OTP."""
-    return str(random.randint(100000, 999999))
+    """
+    Generate a cryptographically secure random 6-digit OTP.
+    BUG FIX: was using random.randint() which is NOT cryptographically
+    secure — OTPs could be predicted by an attacker with enough samples.
+    secrets module uses OS-level CSPRNG (urandom).
+    """
+    return str(secrets.randbelow(900000) + 100000)
 
 
 def hash_otp(otp: str) -> str:
