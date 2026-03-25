@@ -35,6 +35,7 @@ class User(Base):
     datasets       = relationship("Dataset",      back_populates="user", cascade="all, delete")
     chat_sessions  = relationship("ChatSession",  back_populates="user", cascade="all, delete")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete")
+    documents      = relationship("Document",     back_populates="user", cascade="all, delete")
 
 
 # ── 1b. Refresh Tokens ────────────────────────────────────────
@@ -211,3 +212,36 @@ class Recommendation(Base):
     created_at          = Column(TIMESTAMP, nullable=False, default=now)
 
     query = relationship("AIQuery", back_populates="recommendations")
+
+
+# ── 13. Documents (PageIndex) ────────────────────────────────
+class Document(Base):
+    __tablename__ = "documents"
+
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    document_name = Column(String(200), nullable=False)
+    file_path     = Column(Text, nullable=False)
+    page_count    = Column(Integer)
+    tree_index    = Column(JSONB)                     # PageIndex tree structure
+    status        = Column(String(20), nullable=False, default="processing")  # processing | ready | failed
+    error_message = Column(Text, nullable=True)
+    created_at    = Column(TIMESTAMP, nullable=False, default=now)
+
+    user    = relationship("User",          back_populates="documents")
+    queries = relationship("DocumentQuery", back_populates="document", cascade="all, delete")
+
+
+# ── 14. Document Queries (Q&A) ───────────────────────────────
+class DocumentQuery(Base):
+    __tablename__ = "document_queries"
+
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id      = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    user_query       = Column(Text, nullable=False)
+    retrieved_pages  = Column(JSONB)                  # pages found via tree search
+    answer           = Column(Text)
+    confidence_score = Column(Float, nullable=True)
+    created_at       = Column(TIMESTAMP, nullable=False, default=now)
+
+    document = relationship("Document", back_populates="queries")

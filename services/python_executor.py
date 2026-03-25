@@ -29,26 +29,44 @@ import json
 import warnings
 warnings.filterwarnings("ignore")
 
-# Restrict imports
-_BANNED_MODULES = {{"os", "sys", "subprocess", "shutil", "socket", "urllib", "requests", "http"}}
-_original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+# ── Step 1: import pandas and numpy BEFORE installing the hook ─
+# pandas on Windows (delvewheel) internally calls `import os` during its own
+# __init__.py. If the hook is active during this import, it blocks `os` and
+# pandas fails to load. Pre-importing them ensures they (and all their internal
+# deps) are fully loaded and cached in sys.modules before we restrict anything.
+import pandas as pd
+import numpy as np
+
+# ── Step 2: now install the import restriction hook ────────────
+# At this point pandas/numpy and all their deps are in sys.modules.
+# Any future `import os`, `import subprocess`, etc. from USER code will be blocked.
+import builtins as _builtins
+_BANNED_MODULES = {{
+    "os", "subprocess", "shutil", "socket", "urllib", "requests", "http",
+    "ftplib", "telnetlib", "smtplib", "xmlrpc", "multiprocessing",
+    "ctypes", "cffi", "pty", "tty", "termios",
+}}
+_original_import = _builtins.__import__
 
 def _restricted_import(name, *args, **kwargs):
     top_level = name.split(".")[0]
     if top_level in _BANNED_MODULES:
-        raise ImportError(f"Import '{{name}}' is not allowed for security reasons.")
+        raise ImportError(f"Import '{{name}}' is not allowed in this sandbox.")
     return _original_import(name, *args, **kwargs)
 
-import pandas as pd
-import numpy as np
+_builtins.__import__ = _restricted_import
 
-try:
-    __builtins__.__import__ = _restricted_import
-except AttributeError:
-    pass
-
-# Load the dataset
+# ── Step 3: load the dataset ───────────────────────────────────
 df = pd.read_json(sys.argv[1])
+
+# ── Step 4: helper available to user code ────────────────────
+# Provides a safe way to get only numeric columns — prevents the
+# 'could not convert string to float' crash when user code calls
+# .corr() on a mixed-type DataFrame.
+def numeric_df(dataframe=None):
+    """Return only numeric columns from the DataFrame."""
+    d = dataframe if dataframe is not None else df
+    return d.select_dtypes(include='number')
 
 # ── User code starts ──
 {user_code}
