@@ -209,9 +209,10 @@ class AgentState(TypedDict):
     final_answer:     Optional[str]
     error:            Optional[str]
     execution_time_ms: int
-    confidence_score: float
-    generated_code:   Optional[str]
-    code_output:      Optional[str]
+    confidence_score:  float
+    generated_code:    Optional[str]
+    code_output:       Optional[str]
+    python_attempts:   int              # retry counter for python execution
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1485,12 +1486,18 @@ def generate_python_agent(state: AgentState) -> AgentState:
                 "Write Python code using ONLY pandas and numpy to solve the user's request.\n"
                 "The dataset is already loaded in a DataFrame named `df`.\n"
                 "IMPORTANT RULES:\n"
-                "- Do NOT write `import pandas` or `import numpy`. They are already imported.\n"
+                "- Do NOT write `import pandas` or `import numpy`. They are already imported as pd and np.\n"
                 "- Do NOT load the data. `df` already exists.\n"
                 "- MUST assign the final output to a variable named `result`.\n"
                 "- ONLY use `pandas` (pd) and `numpy` (np). No other libraries.\n"
-                "- Wrap the code in ```python code blocks.\n"
-                f"Dataset schema:\n{schema}"
+                "- Wrap the code in ```python code blocks.\n\n"
+                "CRITICAL PANDAS API RULES — most common LLM mistakes:\n"
+                "- Correlation: df[cols].corr() NOT pd.corr(df[cols])\n"
+                "- GroupBy mean: df.groupby('col')['val'].mean() NOT pd.groupby(...)\n"
+                "- Value counts: df['col'].value_counts() NOT pd.value_counts(df['col'])\n"
+                "- Describe: df.describe() NOT pd.describe(df)\n"
+                "- Always call methods ON the DataFrame/Series, never on the pd module.\n"
+                f"\nDataset schema:\n{schema}"
             ),
         },
         {"role": "user", "content": state["user_query"]},
@@ -1503,7 +1510,22 @@ def generate_python_agent(state: AgentState) -> AgentState:
         else:
             # Fallback if no code block tags are used
             code = response.strip()
-            
+
+        # Strip any top-level pandas/numpy import lines the LLM emitted despite instructions.
+        # The sandbox already imports pd and np — re-importing via the restricted hook
+        # would work, but stripping is cleaner and avoids any edge-case failures.
+        cleaned_lines = []
+        for line in code.splitlines():
+            stripped = line.strip()
+            # Drop bare "import pandas", "import numpy", "import pandas as pd", etc.
+            if re.match(r"^import\s+(pandas|numpy)(\s+as\s+\w+)?$", stripped):
+                continue
+            # Drop "from pandas import ...", "from numpy import ..."
+            if re.match(r"^from\s+(pandas|numpy)\b", stripped):
+                continue
+            cleaned_lines.append(line)
+        code = "\n".join(cleaned_lines).strip()
+
         return {**state, "generated_code": code}
     except Exception as e:
         return {**state, "generated_code": None, "error": f"Failed to generate code: {e}", "route": "mismatch"}
@@ -1511,45 +1533,169 @@ def generate_python_agent(state: AgentState) -> AgentState:
 
 # ── AGENT 21: Python Executor ─────────────────────────────────
 def execute_python_agent(state: AgentState) -> AgentState:
-    """Executes generated python code in a sandbox."""
+    """
+    Executes generated Python code in a secure sandbox.
+
+    Fixes applied:
+    - Bug 1: dataset.get_dataframes() doesn't exist → always use read_file_to_dataframes
+    - Bug 2: result_df was never set → now populated so chart/stats agents work
+    - Bug 3: multi-sheet Excel always took sheet[0] → now matches table name
+    - Bug 6: scalar/string results produced 0 rows → wrapped into result_rows so
+             insights agent receives data and doesn't silently skip
+    """
     code = state.get("generated_code")
     if not code:
-        return {**state, "code_output": "No code generated.", "error": "No code."}
-    
-    # Needs actual DataFrame
-    df = state["dataset"].get_dataframes().get(state["dataset"].tables[0].table_name) if hasattr(state["dataset"], "get_dataframes") else None
-    if df is None:
-        # Fallback if method is missing but we're in the pipeline
+        return {**state, "code_output": "No code generated.", "error": "No code generated."}
+
+    # ── Load the DataFrame from the dataset file ───────────────
+    dataset = state["dataset"]
+    df = None
+
+    if getattr(dataset, "file_path", None):
         try:
             from routers.datasets import read_file_to_dataframes
             from pathlib import Path
-            dfs = read_file_to_dataframes(Path(state["dataset"].file_path), state["dataset"].tables[0].table_name)
-            df = list(dfs.values())[0]
+
+            file_path = Path(dataset.file_path)
+            # Use the first table's name as the sheet/table hint
+            table_name = dataset.tables[0].table_name if dataset.tables else None
+            dfs = read_file_to_dataframes(file_path, table_name=table_name)
+
+            # Bug 3 fix: prefer the table that matches the dataset table name
+            if table_name and table_name in dfs:
+                df = dfs[table_name]
+            elif dfs:
+                df = list(dfs.values())[0]
         except Exception as e:
-            return {**state, "error": f"Failed to load DF: {e}"}
-            
+            return {**state, "error": f"Failed to load dataset file: {e}"}
+
+    if df is None or df.empty:
+        return {**state, "error": "Could not load dataset into a DataFrame for Python execution."}
+
+    # ── Execute in sandbox ─────────────────────────────────────
     res = execute_sandboxed(code, df)
-    
-    error = res.get("error")
-    output = res.get("output")
-    result_val = res.get("result")
-    
-    if error:
-        return {**state, "code_output": output, "error": f"Python Execution Error: {error}"}
-        
-    rows = []
+
+    sandbox_error  = res.get("error")
+    output_summary = res.get("output", "")
+    result_val     = res.get("result")
+
+    if sandbox_error:
+        return {
+            **state,
+            "code_output": output_summary,
+            "error": f"Python Execution Error: {sandbox_error}",
+        }
+
+    # ── Normalise result into result_rows (Bug 6 fix) ──────────
+    # result_rows must be a list-of-dicts so insights/chart agents work.
+    # Scalar / string values are wrapped in a single-row dict so they
+    # flow through the pipeline instead of disappearing.
+    rows: List[dict] = []
+    result_df: Optional[object] = None  # type: ignore[assignment]
+
     if isinstance(result_val, list):
+        # Already list-of-dicts from sandbox (DataFrame output)
         rows = result_val
+        # Reconstruct a lightweight DataFrame for chart_agent
+        try:
+            result_df = pd.DataFrame(rows)
+        except Exception:
+            pass
+
     elif isinstance(result_val, dict):
+        # Single dict (e.g. {"pearson_r": 0.87, "p_value": 0.001})
         rows = [result_val]
-        
+        try:
+            result_df = pd.DataFrame([result_val])
+        except Exception:
+            pass
+
+    elif result_val is not None:
+        # Scalar: int, float, str, bool — wrap so it reaches insights
+        rows = [{"result": result_val}]
+        try:
+            result_df = pd.DataFrame(rows)
+        except Exception:
+            pass
+
     return {
-        **state, 
-        "code_output": output, 
-        "result_rows": rows,
-        "row_count": len(rows),
+        **state,
+        "code_output":  output_summary,
+        "result_rows":  rows,
+        "row_count":    len(rows),
+        "result_df":    result_df,   # Bug 2 fix: populate so chart/stats agents work
         "result_valid": True,
+        "result_stats": {},          # stats_enricher is skipped for python route; clear to avoid stale data
     }
+
+# ── AGENT 21b: Python Code Fixer (retry on error) ─────────────
+def fix_python_agent(state: AgentState) -> AgentState:
+    """
+    Retry agent for Python execution errors.
+    Feeds the exact error + broken code back to the LLM for a single
+    self-correcting attempt — mirrors the SQL fix_sql_agent pattern.
+    Only fires once (python_attempts >= 1 check in route_after_execute_python).
+    """
+    schema    = state["schema_text"][:MAX_SCHEMA_CHARS]
+    bad_code  = state.get("generated_code", "")
+    error_msg = state.get("error", "Unknown error")
+
+    # Strip "Python Execution Error: " prefix for cleaner LLM prompt
+    clean_error = re.sub(r"^Python Execution Error:\s*", "", error_msg).strip()
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are an expert Python data analyst.\n"
+                "The code below failed. Fix ONLY the bug — keep the logic intact.\n\n"
+                "CRITICAL PANDAS API RULES:\n"
+                "- Correlation: df[cols].corr() NOT pd.corr(df[cols])\n"
+                "- GroupBy mean: df.groupby('col')['val'].mean() NOT pd.groupby(...)\n"
+                "- Value counts: df['col'].value_counts() NOT pd.value_counts(df['col'])\n"
+                "- Describe: df.describe() NOT pd.describe(df)\n"
+                "- Always call methods ON the DataFrame/Series object, not on pd.\n\n"
+                "OTHER RULES:\n"
+                "- `df` is already loaded. Do NOT import pandas or numpy.\n"
+                "- MUST assign final output to `result`.\n"
+                "- Wrap fixed code in ```python code blocks.\n"
+                f"\nDataset schema:\n{schema}"
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Original request: {state['user_query']}\n\n"
+                f"Broken code:\n```python\n{bad_code}\n```\n\n"
+                f"Error:\n{clean_error}\n\n"
+                "Fix the code."
+            ),
+        },
+    ]
+    try:
+        response = call_groq(messages, max_tokens=512, temperature=0.1)
+        match = re.search(r"```(?:python|py)?(.*?)```", response, flags=re.DOTALL | re.IGNORECASE)
+        fixed_code = match.group(1).strip() if match else response.strip()
+
+        # Strip import lines as usual
+        cleaned_lines = []
+        for line in fixed_code.splitlines():
+            stripped = line.strip()
+            if re.match(r"^import\s+(pandas|numpy)(\s+as\s+\w+)?$", stripped):
+                continue
+            if re.match(r"^from\s+(pandas|numpy)\b", stripped):
+                continue
+            cleaned_lines.append(line)
+        fixed_code = "\n".join(cleaned_lines).strip()
+
+        return {
+            **state,
+            "generated_code":   fixed_code,
+            "error":            None,          # clear so execute_python_agent runs clean
+            "python_attempts":  state.get("python_attempts", 0) + 1,
+        }
+    except Exception as e:
+        return {**state, "error": f"Python fix failed: {e}"}
 
 
 def _compute_confidence(state: AgentState) -> float:
@@ -1630,6 +1776,20 @@ def final_agent(state: AgentState) -> AgentState:
 # CONDITIONAL EDGES
 # ════════════════════════════════════════════════════════════════
 
+def route_after_execute_python(state: AgentState) -> str:
+    """
+    After execute_python_agent:
+    - success → insights
+    - first error → fix_python (single retry)
+    - second error (python_attempts >= 1) → final with error message
+    """
+    if not state.get("error"):
+        return "insights"
+    if state.get("python_attempts", 0) < 1:
+        return "fix_python"
+    return "final"
+
+
 def route_after_router(state: AgentState) -> str:
     # Fix #1: removed dead code — router always goes to memory_retriever
     # Graph uses add_edge("router", "memory_retriever") directly — this function unused
@@ -1694,6 +1854,7 @@ def build_agent():
     # Python route
     graph.add_node("generate_python", generate_python_agent)
     graph.add_node("execute_python",  execute_python_agent)
+    graph.add_node("fix_python",      fix_python_agent)
     
     graph.add_node("insights",        insights_agent)
     graph.add_node("scrape_web",      scrape_web_agent)
@@ -1748,8 +1909,14 @@ def build_agent():
     
     # Python pipeline
     graph.add_edge("generate_python", "execute_python")
-    # Both SQL and Python pipelines merge at insights
-    graph.add_edge("execute_python",  "insights")
+    # execute_python → insights (success) or fix_python (retry) or final (give up)
+    graph.add_conditional_edges("execute_python", route_after_execute_python, {
+        "insights":    "insights",
+        "fix_python":  "fix_python",
+        "final":       "final",
+    })
+    # After fix, retry execution
+    graph.add_edge("fix_python", "execute_python")
 
     # Post-execution pipeline
     graph.add_edge("stats_enricher",  "insights")
@@ -1813,6 +1980,10 @@ def run_agent(
         "final_answer":        None,
         "error":               None,
         "execution_time_ms":   0,
+        "generated_code":      None,   # Python route: LLM-generated pandas code
+        "code_output":         None,   # Python route: sandbox stdout / summary
+        "confidence_score":    1.0,    # computed in final_agent
+        "python_attempts":     0,      # retry counter for python execution
     }
     # Fix efficiency: compile agent once — reuse across requests
     global _COMPILED_AGENT

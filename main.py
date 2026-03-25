@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
 import models
 
-from routers import auth, users, datasets, chat, ai
+from routers import auth, users, datasets, chat, ai, documents
 from services.logger import setup_logger
 
 # Setup root logger
@@ -42,3 +42,4 @@ app.include_router(users.router,    prefix="/users",    tags=["Users"])
 app.include_router(datasets.router, prefix="/datasets", tags=["Datasets"])
 app.include_router(chat.router,     prefix="/chat",     tags=["Chat"])
 app.include_router(ai.router,       prefix="/ai",       tags=["AI"])
+app.include_router(documents.router, prefix="/documents", tags=["Documents"])
