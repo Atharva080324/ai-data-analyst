@@ -152,13 +152,15 @@ def generate_sql_from_groq(schema_text: str, user_query: str) -> tuple[str, str]
 def generate_insights(
     user_query: str,
     sql: str,
-    results_preview: list,
+    results_preview: list[dict],
     row_count: int,
-) -> list[dict]:
+) -> List[dict]:
     if not results_preview:
         return []
 
-    results_sample = json.dumps(results_preview[:20], default=str)
+    results_sample = json.dumps(
+        [x for i, x in enumerate(results_preview) if i < 20], default=str
+    )
 
     messages = [
         {
@@ -382,9 +384,11 @@ def analyze(
         route=result.get("route", "sql"),
     )
 
+    from services.agent import sanitize_rows as _sanitize
+
     generated_sql = result.get("generated_sql", "")
     row_count     = result.get("row_count", 0)
-    result_rows   = result.get("result_rows", [])
+    result_rows   = _sanitize(result.get("result_rows", []))
 
     ai_query     = None
     qr           = None
@@ -447,7 +451,7 @@ def analyze(
 
     now = datetime.utcnow()
 
-    if insight_objs and all(hasattr(o, "id") and o.id for o in insight_objs):
+    if insight_objs and all(hasattr(o, "id") and getattr(o, "id", None) for o in insight_objs):
         insights_out = insight_objs
     else:
         insights_out = [
@@ -456,7 +460,7 @@ def analyze(
             for ins in result.get("insights", [])
         ]
 
-    if rec_objs and all(hasattr(o, "id") and o.id for o in rec_objs):
+    if rec_objs and all(hasattr(o, "id") and getattr(o, "id", None) for o in rec_objs):
         recs_out = rec_objs
     else:
         recs_out = [
@@ -467,7 +471,7 @@ def analyze(
 
     viz_out = []
     if result.get("chart_config"):
-        if viz_objs and all(hasattr(o, "id") and o.id for o in viz_objs):
+        if viz_objs and all(hasattr(o, "id") and getattr(o, "id", None) for o in viz_objs):
             viz_out = viz_objs
         else:
             viz_out = [{
@@ -793,7 +797,7 @@ def agent_analyze_stream(
         }
         
         # Stream intermediate graph states
-        final_state = None
+        final_state: dict = initial_state.copy()
         for step in agent_graph.stream(initial_state):
             # step is a dict like {'node_name': {state_updates}}
             for node_name, state in step.items():
@@ -882,25 +886,32 @@ def agent_analyze_stream(
                         result_preview=result.get("result_rows", []),
                     ))
 
-                    for ins in result.get("insights", []):
-                        db_generator.add(Insight(
-                            query_id=ai_query.id,
-                            insight_text=ins["text"],
-                            importance_score=ins["score"],
-                        ))
+                    insights = result.get("insights")
+                    if isinstance(insights, list):
+                        for ins in insights:
+                            if isinstance(ins, dict):
+                                db_generator.add(Insight(
+                                    query_id=ai_query.id,
+                                    insight_text=ins.get("text", ""),
+                                    importance_score=ins.get("score", 0.5),
+                                ))
 
-                    for rec in result.get("recommendations", []):
-                        db_generator.add(Recommendation(
-                            query_id=ai_query.id,
-                            recommendation_text=rec["text"],
-                            confidence_score=rec["score"],
-                        ))
+                    recs = result.get("recommendations")
+                    if isinstance(recs, list):
+                        for rec in recs:
+                            if isinstance(rec, dict):
+                                db_generator.add(Recommendation(
+                                    query_id=ai_query.id,
+                                    recommendation_text=rec.get("text", ""),
+                                    confidence_score=rec.get("score", 0.5),
+                                ))
 
-                    if result.get("chart_config"):
+                    chart_config = result.get("chart_config")
+                    if isinstance(chart_config, dict):
                         db_generator.add(Visualization(
                             query_id=ai_query.id,
-                            chart_type=result["chart_config"].get("type", "bar"),
-                            chart_config=result["chart_config"],
+                            chart_type=chart_config.get("type", "bar"),
+                            chart_config=chart_config,
                         ))
 
                     sess.last_activity = datetime.utcnow()

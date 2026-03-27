@@ -7,7 +7,7 @@ import { AuthLayout } from "@/components/layout/AuthLayout"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/Card"
 import { Input } from "@/components/ui/Input"
 import { Button } from "@/components/ui/Button"
-import { Mail, Lock, User, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from "lucide-react"
+import { Mail, Lock, User, ArrowRight, Loader2, AlertCircle } from "lucide-react"
 import { signupUser } from "@/lib/auth"
 
 export default function SignupPage() {
@@ -37,10 +37,10 @@ export default function SignupPage() {
   return (
     <AuthLayout>
       <div className="animate-slide-up" style={{ animationDuration: "0.6s" }}>
-        <Card className="border-white/10 shadow-[0_0_80px_rgba(255,255,255,0.05)] mt-8">
+        <Card className="border-t-brand/50 shadow-glow mt-8 mx-auto w-full max-w-[440px]">
           <CardHeader className="text-center pb-6">
-            <CardTitle className="text-3xl font-bold tracking-tight mb-2 text-white">Create Account</CardTitle>
-            <CardDescription className="text-base text-white/50">
+            <CardTitle className="text-3xl font-display font-bold tracking-tight mb-2 text-foreground">Create Account</CardTitle>
+            <CardDescription className="text-base text-foreground/50">
               Join forward-thinking analysts and startups today.
             </CardDescription>
           </CardHeader>
@@ -53,14 +53,14 @@ export default function SignupPage() {
             )}
             <form onSubmit={handleSignup} className="space-y-5">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-white/70 pl-1" htmlFor="name">Full Name</label>
+                <label className="text-sm font-medium text-foreground/70 pl-1" htmlFor="name">Full Name</label>
                 <div className="relative group">
-                  <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-brand-light transition-colors" />
+                  <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-foreground/40 group-focus-within:text-brand-light transition-colors pointer-events-none" />
                   <Input 
                     id="name" 
                     type="text" 
                     placeholder="John Doe" 
-                    className="pl-12 h-14 text-base bg-white/[0.02] border-white/10 text-white placeholder:text-white/20 focus-visible:bg-white/[0.05] focus-visible:border-brand-light focus-visible:ring-brand-light" 
+                    className="pl-12 h-14 bg-surface/[0.5] text-base border-surface-border text-foreground placeholder:text-foreground/30 focus-visible:bg-surface/[0.8] focus-visible:border-brand-light focus-visible:ring-brand-light" 
                     required 
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -69,14 +69,14 @@ export default function SignupPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-white/70 pl-1" htmlFor="email">Work Email</label>
+                <label className="text-sm font-medium text-foreground/70 pl-1" htmlFor="email">Work Email</label>
                 <div className="relative group">
-                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-brand-light transition-colors" />
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-foreground/40 group-focus-within:text-brand-light transition-colors pointer-events-none" />
                   <Input 
                     id="email" 
                     type="email" 
                     placeholder="name@company.com" 
-                    className="pl-12 h-14 text-base bg-white/[0.02] border-white/10 text-white placeholder:text-white/20 focus-visible:bg-white/[0.05] focus-visible:border-brand-light focus-visible:ring-brand-light" 
+                    className="pl-12 h-14 bg-surface/[0.5] text-base border-surface-border text-foreground placeholder:text-foreground/30 focus-visible:bg-surface/[0.8] focus-visible:border-brand-light focus-visible:ring-brand-light" 
                     required 
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -85,20 +85,20 @@ export default function SignupPage() {
               </div>
               
               <div className="space-y-2">
-                <label className="text-sm font-medium text-white/70 pl-1" htmlFor="password">Password</label>
+                <label className="text-sm font-medium text-foreground/70 pl-1" htmlFor="password">Password</label>
                 <div className="relative group">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-brand-light transition-colors" />
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-foreground/40 group-focus-within:text-brand-light transition-colors pointer-events-none" />
                   <Input 
                     id="password" 
                     type="password" 
                     placeholder="••••••••" 
-                    className="pl-12 h-14 text-base bg-white/[0.02] border-white/10 text-white placeholder:text-white/20 focus-visible:bg-white/[0.05] focus-visible:border-brand-light focus-visible:ring-brand-light" 
+                    className="pl-12 h-14 bg-surface/[0.5] text-base border-surface-border text-foreground placeholder:text-foreground/30 focus-visible:bg-surface/[0.8] focus-visible:border-brand-light focus-visible:ring-brand-light" 
                     required 
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
                 </div>
-                <p className="text-xs text-white/30 pl-1">Min 8 chars, 1 uppercase, 1 number</p>
+                <p className="text-xs text-foreground/40 pl-1">Min 8 chars, 1 uppercase, 1 number</p>
               </div>
 
               <Button type="submit" variant="brand" className="w-full h-14 text-lg mt-6 group" disabled={isLoading}>

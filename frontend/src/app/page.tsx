@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Navbar } from "@/components/layout/Navbar"
 import { Button } from "@/components/ui/Button"
 import Link from "next/link"
@@ -24,17 +26,17 @@ export default function Home() {
         </video>
 
         {/* Subtle radial shadow strictly for text readability, keeping the video crystal clear */}
-        <div className="absolute inset-y-0 left-0 w-full md:w-[60%] bg-[radial-gradient(ellipse_at_left,rgba(10,10,15,0.85)_0%,transparent_80%)] z-0 pointer-events-none" />
+        <div className="absolute inset-y-0 left-0 w-full md:w-[60%] bg-[radial-gradient(ellipse_at_left,rgba(6,6,10,0.85)_0%,transparent_80%)] z-0 pointer-events-none" />
         
-        {/* Ambient Lights */}
-        <div className="absolute top-1/2 left-0 -translate-y-1/2 w-[800px] h-[800px] bg-brand/20 blur-[150px] rounded-[100%] pointer-events-none opacity-40 z-0" />
+        {/* Ambient Lights - Warm Gold */}
+        <div className="absolute top-1/2 left-0 -translate-y-1/2 w-[800px] h-[800px] bg-brand/10 blur-[150px] rounded-[100%] pointer-events-none opacity-40 z-0" />
         
         <div className="container mx-auto max-w-7xl relative z-10 h-full flex items-center justify-start">
           
           {/* Left Column: AI Analysis Copy (Luxury minimalism) */}
           <div className="relative z-10 flex flex-col items-start text-left w-full max-w-4xl px-4 md:px-0">
             
-            <h1 className="text-5xl md:text-6xl lg:text-[5.5rem] font-bold tracking-tight text-white mb-8 leading-[1.05] animate-slide-up drop-shadow-2xl">
+            <h1 className="text-5xl md:text-6xl lg:text-[5.5rem] font-display font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-white to-brand-light mb-8 leading-[1.05] animate-slide-up drop-shadow-2xl">
               Make Every<br />
               Decision Count
             </h1>
@@ -86,15 +88,15 @@ export default function Home() {
 
             {/* Right Side: Copy & Button */}
             <div className="relative z-10 flex flex-col items-start text-left w-full md:w-2/3">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand to-accent flex items-center justify-center mb-6 shadow-glow-lg">
-                <BarChart3 className="w-8 h-8 text-white" />
+              <div className="w-16 h-16 rounded-2xl bg-primary-gradient flex items-center justify-center mb-6 shadow-glow-lg border border-brand/30">
+                <BarChart3 className="w-8 h-8 text-background" />
               </div>
-              <h2 className="text-4xl md:text-5xl font-bold mb-4 tracking-tight">Ready to map your data?</h2>
+              <h2 className="text-4xl md:text-5xl font-display font-bold mb-4 tracking-tight">Ready to map your data?</h2>
               <p className="text-xl text-foreground/70 mb-8 max-w-2xl">
                 Jump straight into the dashboard, upload a dataset, and let our AI generate professional graphs, pie charts, and deep insights instantly.
               </p>
               <Link href="/dashboard">
-                <Button variant="brand" size="lg" className="h-14 px-10 text-lg font-bold shadow-[0_0_30px_rgba(138,43,226,0.4)] hover:shadow-[0_0_50px_rgba(138,43,226,0.6)] hover:scale-105 transition-all duration-300">
+                <Button variant="brand" size="lg" className="h-14 px-10 text-lg font-bold shadow-[0_0_30px_rgba(212,168,83,0.3)] hover:shadow-[0_0_50px_rgba(212,168,83,0.5)] hover:scale-105 transition-all duration-300">
                   Build Analysis Now
                   <ArrowRight className="w-5 h-5 ml-3" />
                 </Button>
@@ -110,7 +112,7 @@ export default function Home() {
         <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-surface-border to-transparent" />
         <div className="container mx-auto px-6 max-w-6xl relative z-10">
           <div className="text-center mb-20 animate-fade-in">
-            <h2 className="text-4xl md:text-5xl font-bold mb-6 tracking-tight">Intelligent Features</h2>
+            <h2 className="text-4xl md:text-5xl font-display font-bold mb-6 tracking-tight luxury-text-gradient inline-block">Intelligent Features</h2>
             <p className="text-foreground/60 max-w-2xl mx-auto text-xl">Everything you need to turn raw data into strategic advantage.</p>
           </div>
 
@@ -147,7 +149,7 @@ export default function Home() {
       <section id="how-it-works" className="py-32 relative bg-surface/[0.02] border-t border-surface-border/50">
         <div className="container mx-auto px-6 max-w-5xl relative z-10">
           <div className="text-center mb-24 animate-fade-in">
-            <h2 className="text-4xl md:text-5xl font-bold mb-6 tracking-tight">How it Works</h2>
+            <h2 className="text-4xl md:text-5xl font-display font-bold mb-6 tracking-tight">How it Works</h2>
             <p className="text-foreground/60 max-w-2xl mx-auto text-xl">A seamless, fully automated AI pipeline.</p>
           </div>
 
@@ -246,7 +248,7 @@ export default function Home() {
             </video>
 
             <div className="absolute inset-0 bg-brand/5 group-hover:bg-brand/10 transition-colors duration-700 z-0" />
-            <Database className="relative z-10 w-32 h-32 text-brand-light drop-shadow-[0_0_30px_rgba(138,43,226,0.5)] group-hover:scale-110 transition-transform duration-700" />
+            <Database className="relative z-10 w-32 h-32 text-brand-light drop-shadow-[0_0_30px_rgba(240,201,123,0.5)] group-hover:scale-110 transition-transform duration-700" />
           </div>
         </div>
       </section>
@@ -258,7 +260,7 @@ export default function Home() {
         <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-surface-border to-transparent" />
         
         <div className="container mx-auto px-6 max-w-5xl relative z-10 text-center animate-slide-up">
-          <h2 className="text-5xl md:text-7xl font-bold tracking-tight mb-8 text-balance leading-tight">
+          <h2 className="text-5xl md:text-7xl font-display font-bold tracking-tight mb-8 text-balance leading-tight">
             Ready to unlock the hidden value in your data?
           </h2>
           <p className="text-2xl text-foreground/70 mb-14 max-w-3xl mx-auto text-balance">
@@ -266,7 +268,7 @@ export default function Home() {
           </p>
           <div className="flex flex-col items-center">
             <Link href="/signup">
-              <Button variant="brand" size="lg" className="mb-6 h-16 px-12 text-xl font-bold shadow-[0_0_40px_rgba(138,43,226,0.5)] hover:shadow-[0_0_60px_rgba(138,43,226,0.8)] transition-all duration-500 hover:scale-105">
+              <Button variant="brand" size="lg" className="mb-6 h-16 px-12 text-xl font-bold shadow-[0_0_40px_rgba(212,168,83,0.4)] hover:shadow-[0_0_60px_rgba(212,168,83,0.6)] transition-all duration-500 hover:scale-105">
                 Create Your Free Account
               </Button>
             </Link>
@@ -285,10 +287,10 @@ export default function Home() {
 function FeatureCard({ icon, title, description, delay }: { icon: React.ReactNode, title: string, description: string, delay: string }) {
   return (
     <div className="glass-panel p-10 rounded-[2rem] group hover:border-brand/40 transition-colors duration-500 animate-slide-up" style={{ animationDelay: delay, animationFillMode: "both" }}>
-      <div className="w-16 h-16 rounded-2xl bg-surface mb-8 flex items-center justify-center border border-surface-border group-hover:bg-brand/10 group-hover:border-brand/30 transition-colors duration-500 shadow-sm">
+      <div className="w-16 h-16 rounded-2xl bg-[#06060A] mb-8 flex items-center justify-center border border-surface-border group-hover:bg-brand/10 group-hover:border-brand/30 transition-colors duration-500 shadow-sm">
         {icon}
       </div>
-      <h3 className="text-2xl font-bold text-white mb-4 tracking-tight">{title}</h3>
+      <h3 className="text-2xl font-display font-bold text-white mb-4 tracking-tight">{title}</h3>
       <p className="text-foreground/70 leading-relaxed text-lg">
         {description}
       </p>

@@ -26,20 +26,22 @@ import pandas as pd
 _CODE_TEMPLATE = textwrap.dedent(r'''
 import sys
 import json
+
+# ── Step 1: import pandas, numpy, and stdlib helpers BEFORE the hook ───────
+# pandas on Windows (delvewheel) internally imports `os`, `warnings`, and
+# other stdlib modules during its __init__.py.  Pre-importing everything here
+# puts them in sys.modules first so the restriction hook never sees them.
 import warnings
 warnings.filterwarnings("ignore")
-
-# ── Step 1: import pandas and numpy BEFORE installing the hook ─
-# pandas on Windows (delvewheel) internally calls `import os` during its own
-# __init__.py. If the hook is active during this import, it blocks `os` and
-# pandas fails to load. Pre-importing them ensures they (and all their internal
-# deps) are fully loaded and cached in sys.modules before we restrict anything.
+import collections
+import math
+import statistics
 import pandas as pd
 import numpy as np
 
-# ── Step 2: now install the import restriction hook ────────────
-# At this point pandas/numpy and all their deps are in sys.modules.
-# Any future `import os`, `import subprocess`, etc. from USER code will be blocked.
+# ── Step 2: install the import restriction hook ────────────────────────────
+# Everything pandas/numpy need is already cached in sys.modules.
+# From here, user code cannot import dangerous modules.
 import builtins as _builtins
 _BANNED_MODULES = {{
     "os", "subprocess", "shutil", "socket", "urllib", "requests", "http",

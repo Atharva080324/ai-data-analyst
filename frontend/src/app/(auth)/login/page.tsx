@@ -35,10 +35,10 @@ export default function LoginPage() {
   return (
     <AuthLayout>
       <div className="animate-slide-up" style={{ animationDuration: "0.6s" }}>
-        <Card className="border-white/10 shadow-[0_0_80px_rgba(255,255,255,0.05)]">
+        <Card className="border-t-brand/50 shadow-glow mx-auto w-full max-w-[440px]">
           <CardHeader className="text-center pb-6">
-            <CardTitle className="text-3xl font-bold tracking-tight mb-2 text-white">Welcome back</CardTitle>
-            <CardDescription className="text-base text-white/50">
+            <CardTitle className="text-3xl font-display font-bold tracking-tight mb-2 text-foreground">Welcome back</CardTitle>
+            <CardDescription className="text-base text-foreground/50">
               Sign in to your AI Data Analyst account
             </CardDescription>
           </CardHeader>
@@ -51,14 +51,14 @@ export default function LoginPage() {
             )}
             <form onSubmit={handleLogin} className="space-y-5">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-white/70 pl-1" htmlFor="email">Email Address</label>
+                <label className="text-sm font-medium text-foreground/70 pl-1" htmlFor="email">Email Address</label>
                 <div className="relative group">
-                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-brand-light transition-colors" />
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-foreground/40 group-focus-within:text-brand-light transition-colors pointer-events-none" />
                   <Input 
                     id="email" 
                     type="email" 
                     placeholder="name@company.com" 
-                    className="pl-12 h-14 text-base bg-white/[0.02] border-white/10 text-white placeholder:text-white/20 focus-visible:bg-white/[0.05] focus-visible:border-brand-light focus-visible:ring-brand-light" 
+                    className="pl-12 h-14 bg-surface/[0.5] text-base border-surface-border text-foreground placeholder:text-foreground/30 focus-visible:bg-surface/[0.8] focus-visible:border-brand-light focus-visible:ring-brand-light" 
                     required 
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -68,16 +68,16 @@ export default function LoginPage() {
               
               <div className="space-y-2">
                 <div className="flex items-center justify-between pl-1">
-                  <label className="text-sm font-medium text-white/70" htmlFor="password">Password</label>
-                  <Link href="/forgot-password" className="text-sm text-brand-light hover:text-white transition-colors font-medium">Forgot password?</Link>
+                  <label className="text-sm font-medium text-foreground/70" htmlFor="password">Password</label>
+                  <Link href="/forgot-password" className="text-sm text-brand-light hover:text-brand transition-colors font-medium">Forgot password?</Link>
                 </div>
                 <div className="relative group">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 group-focus-within:text-brand-light transition-colors" />
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-foreground/40 group-focus-within:text-brand-light transition-colors pointer-events-none" />
                   <Input 
                     id="password" 
                     type="password" 
                     placeholder="••••••••" 
-                    className="pl-12 h-14 text-base bg-white/[0.02] border-white/10 text-white placeholder:text-white/20 focus-visible:bg-white/[0.05] focus-visible:border-brand-light focus-visible:ring-brand-light" 
+                    className="pl-12 h-14 bg-surface/[0.5] text-base border-surface-border text-foreground placeholder:text-foreground/30 focus-visible:bg-surface/[0.8] focus-visible:border-brand-light focus-visible:ring-brand-light" 
                     required 
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}

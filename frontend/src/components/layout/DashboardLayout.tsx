@@ -44,9 +44,9 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <DashboardNavbar />
       <main className="flex-1 mt-20">
-        {/* Subtle ambient lighting */}
+        {/* Subtle ambient lighting - Warm Gold/Champagne */}
         <div className="fixed top-[10%] right-[-10%] w-[800px] h-[800px] bg-brand/5 blur-[120px] rounded-full pointer-events-none" />
-        <div className="fixed bottom-[-10%] left-[10%] w-[600px] h-[600px] bg-accent/5 blur-[120px] rounded-full pointer-events-none" />
+        <div className="fixed bottom-[-10%] left-[10%] w-[600px] h-[600px] bg-[#D4A853]/5 blur-[120px] rounded-full pointer-events-none" />
         
         <div className="relative z-10 p-6 md:p-10 max-w-7xl mx-auto min-h-screen">
           {children}

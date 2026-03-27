@@ -100,3 +100,45 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+// ── Document API Helpers ─────────────────────────────────────
+
+export interface DocumentSummary {
+  id: string
+  document_name: string
+  page_count: number | null
+  status: string
+  query_count: number
+  created_at: string
+}
+
+export interface DocumentAskResponse {
+  question: string
+  answer: string
+  retrieved_pages: { title: string; start_page: number; end_page: number; summary: string }[] | null
+  confidence_score: number | null
+}
+
+export async function uploadDocument(name: string, file: File) {
+  const formData = new FormData()
+  formData.append("document_name", name)
+  formData.append("file", file)
+  const { data } = await api.post("/documents/upload", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  })
+  return data
+}
+
+export async function listDocuments(): Promise<DocumentSummary[]> {
+  const { data } = await api.get("/documents/")
+  return data
+}
+
+export async function askDocument(documentId: string, question: string): Promise<DocumentAskResponse> {
+  const { data } = await api.post("/documents/ask", { document_id: documentId, question })
+  return data
+}
+
+export async function deleteDocument(documentId: string) {
+  await api.delete(`/documents/${documentId}`)
+}
