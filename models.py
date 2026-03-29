@@ -77,6 +77,7 @@ class Dataset(Base):
     file_path           = Column(Text)
     database_connection = Column(JSONB)
     description         = Column(Text)
+    suggested_questions = Column(JSONB, nullable=True)
     created_at          = Column(TIMESTAMP, nullable=False, default=now)
 
     user          = relationship("User",         back_populates="datasets")

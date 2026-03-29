@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: #06060A; /* Deeper obsidian */
+    --foreground: #fcfcfc;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased min-h-screen overflow-x-hidden;
+    /* Warm gold ambient lighting instead of purple/indigo */
+    background-image: 
+      radial-gradient(circle at 15% 50%, rgba(212, 168, 83, 0.04), transparent 35%),
+      radial-gradient(circle at 85% 30%, rgba(240, 201, 123, 0.03), transparent 30%);
+    background-attachment: fixed;
+  }
+
+  /* Custom Scrollbar - matching gold theme */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-surface-border rounded-full hover:bg-brand transition-colors;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  /* Reusable Glass Effect - Warmer tint */
+  .glass-panel {
+    @apply rounded-3xl bg-[#ffffff03] backdrop-blur-3xl shadow-[0_8px_32px_rgba(0,0,0,0.6)] border border-[#d4a8531a] overflow-hidden relative;
+  }
+  
+  /* Luxury Gold Text Gradient */
+  .luxury-text-gradient {
+    @apply bg-clip-text text-transparent bg-luxury-gradient bg-[length:200%_auto] animate-shimmer;
+  }
+}
+
+@keyframes progress {
+  0% { width: 20%; opacity: 0.6; }
+  50% { width: 80%; opacity: 1; }
+  100% { width: 20%; opacity: 0.6; }
+}

@@ -65,6 +65,13 @@ def generate_tree_index(pdf_path: str, model: str = None) -> dict:
 
     Returns the tree structure as a dict/list.
     """
+    import sys
+    from pathlib import Path
+    
+    pageindex_clone_path = str((Path(__file__).parent.parent / "PageIndex_clone").resolve())
+    if pageindex_clone_path not in sys.path:
+        sys.path.append(pageindex_clone_path)
+
     from pageindex import page_index_main
     from pageindex.utils import ConfigLoader
 

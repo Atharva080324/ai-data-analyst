@@ -96,6 +96,8 @@ from services.memory import (
     clear_session,
 )
 
+from services.academic_context import ACADEMIC_DOMAIN_CONTEXT, detect_academic_dataset
+
 load_dotenv()
 
 NEWS_API_KEY      = os.getenv("NEWS_API_KEY", "")
@@ -104,6 +106,43 @@ WEB_SCRAPE_TIMEOUT = 3    # seconds
 MAX_CHART_POINTS  = 50    # Fix #8: cap chart data points to prevent frontend crash
 MAX_SCHEMA_CHARS  = 2000  # Fix efficiency: trim schema to save tokens
 MAX_MEMORY_CHARS  = 1000  # Fix efficiency: trim memory context to save tokens
+
+
+def sanitize_rows(rows: list) -> list:
+    """
+    Convert all non-JSON-serializable pandas/numpy special types to plain
+    Python types so Pydantic can serialize the result without crashing.
+
+    Handles:
+    - pd.NA  (pandas nullable integer / string NA)
+    - pd.NaT (pandas not-a-time)
+    - float('nan') / float('inf')
+    - numpy scalar types (np.int64, np.float64, np.bool_, …)
+    """
+    import math
+    import numpy as np
+
+    def _clean(v):
+        # pandas NA sentinel types → None
+        if v is pd.NA or v is pd.NaT:
+            return None
+        # numpy booleans
+        if isinstance(v, (np.bool_,)):
+            return bool(v)
+        # numpy integer scalars
+        if isinstance(v, (np.integer,)):
+            return int(v)
+        # numpy float scalars and Python floats — guard nan/inf
+        if isinstance(v, (np.floating, float)):
+            if math.isnan(v) or math.isinf(v):
+                return None
+            return float(v)
+        # numpy string / bytes
+        if isinstance(v, (np.str_, np.bytes_)):
+            return str(v)
+        return v
+
+    return [{k: _clean(val) for k, val in row.items()} for row in rows]
 
 
 def safe_json_extract(text: str) -> Optional[list]:
@@ -668,6 +707,7 @@ def planning_agent(state: AgentState) -> AgentState:
                 "Format: numbered list only (unless MISMATCH).\n\n"
                 f"Schema:\n{state['schema_text']}"
                 f"{memory_section}"
+                + (f"\n\n{ACADEMIC_DOMAIN_CONTEXT[:1500]}" if detect_academic_dataset(state['schema_text']) else "")
             ),
         },
         {"role": "user", "content": f"Plan for: {state['user_query']}"},
@@ -780,7 +820,7 @@ def generate_sql_agent(state: AgentState) -> AgentState:
                 "- ALWAYS quote table names that contain spaces with double quotes: \"Table Name\".\n"
                 "- Use correct values from [values: ...] hints for WHERE clauses.\n"
                 "- Always wrap SQL in ```sql code block.\n"
-                "- ALWAYS include LIMIT 100 unless user explicitly asks for all data.\n"
+                "- Do NOT add LIMIT unless the user explicitly asks for a specific number of results.\n"
                 "- For numeric values stored as TEXT: always use TRY_CAST not CAST.\n"
                 "  TRY_CAST returns NULL on failure instead of crashing.\n"
                 "- For columns with spaces in names: always use double quotes: \"Column Name\".\n"
@@ -792,6 +832,7 @@ def generate_sql_agent(state: AgentState) -> AgentState:
                 f"{memory_section}"
                 f"{last_section}"
                 f"\nExamples based on this dataset:\n{few_shots}"
+                + (f"\n\n{ACADEMIC_DOMAIN_CONTEXT[:2000]}" if detect_academic_dataset(schema) else "")
             ),
         },
         {"role": "user", "content": f"Generate SQL: {state['user_query']}"},
@@ -997,9 +1038,9 @@ def execute_sql_agent(state: AgentState) -> AgentState:
         # Sanitize Infinity — invalid in JSON. NaN is handled by to_json() → null.
         import numpy as np
         df = df.replace([np.inf, -np.inf], None)
-        result_rows = json.loads(
-            df.head(100).to_json(orient="records", date_format="iso", default_handler=str)
-        )
+        result_rows = sanitize_rows(json.loads(
+            df.to_json(orient="records", date_format="iso", default_handler=str)
+        ))
         return {
             **state,
             "result_df":         df,
@@ -1197,7 +1238,7 @@ def insights_agent(state: AgentState) -> AgentState:
     if not state.get("result_rows"):
         return {**state, "insights": []}
 
-    sample = json.dumps(state["result_rows"][:20], default=str)
+    sample = json.dumps(state["result_rows"][:50], default=str)
     result_stats = state.get("result_stats", {})
     stats_json = json.dumps(result_stats, default=str)
     query_type = result_stats.get("_query_type", "general")
@@ -1266,11 +1307,12 @@ def insights_agent(state: AgentState) -> AgentState:
                 f"Pre-computed statistics (use these EXACT numbers, do not recalculate):\n{stats_json}\n\n"
                 f"Raw result rows:\n{sample}\n\n"
                 "Generate 3 DIFFERENT insights — each must add new information."
+                + (f"\n\nAcademic context:\n{ACADEMIC_DOMAIN_CONTEXT[:800]}" if detect_academic_dataset(state.get('schema_text', '')) else "")
             ),
         },
     ]
     try:
-        response = call_groq(messages, max_tokens=600, temperature=0.3)
+        response = call_groq(messages, max_tokens=1200, temperature=0.3)
         clean    = re.sub(r"```.*?```", "", response, flags=re.DOTALL).strip()
         data     = safe_json_extract(clean)
         if data:
@@ -1318,7 +1360,7 @@ def recommendations_agent(state: AgentState) -> AgentState:
         web_section = f"\nCurrent industry news:\n{scraped_context}\n"
 
     # Include raw data context so recommendations are grounded
-    result_sample = json.dumps(state.get("result_rows", [])[:10], default=str)
+    result_sample = json.dumps(state.get("result_rows", [])[:30], default=str)
     stats_json    = json.dumps(state.get("result_stats", {}), default=str)
 
     messages = [
@@ -1351,7 +1393,7 @@ def recommendations_agent(state: AgentState) -> AgentState:
         },
     ]
     try:
-        response = call_groq(messages, max_tokens=512, temperature=0.3)
+        response = call_groq(messages, max_tokens=1000, temperature=0.3)
         clean    = re.sub(r"```.*?```", "", response, flags=re.DOTALL).strip()
         data     = safe_json_extract(clean)
         if data:
@@ -1462,6 +1504,7 @@ def explain_agent(state: AgentState) -> AgentState:
                 "- If you are not certain, say so.\n\n"
                 f"Dataset schema:\n{state['schema_text']}"
                 f"{memory_section}"
+                + (f"\n\n{ACADEMIC_DOMAIN_CONTEXT[:1500]}" if detect_academic_dataset(state['schema_text']) else "")
             ),
         },
         {"role": "user", "content": state["user_query"]},
@@ -1595,7 +1638,7 @@ def execute_python_agent(state: AgentState) -> AgentState:
 
     if isinstance(result_val, list):
         # Already list-of-dicts from sandbox (DataFrame output)
-        rows = result_val
+        rows = sanitize_rows(result_val)
         # Reconstruct a lightweight DataFrame for chart_agent
         try:
             result_df = pd.DataFrame(rows)
@@ -1604,15 +1647,15 @@ def execute_python_agent(state: AgentState) -> AgentState:
 
     elif isinstance(result_val, dict):
         # Single dict (e.g. {"pearson_r": 0.87, "p_value": 0.001})
-        rows = [result_val]
+        rows = sanitize_rows([result_val])
         try:
-            result_df = pd.DataFrame([result_val])
+            result_df = pd.DataFrame(rows)
         except Exception:
             pass
 
     elif result_val is not None:
         # Scalar: int, float, str, bool — wrap so it reaches insights
-        rows = [{"result": result_val}]
+        rows = sanitize_rows([{"result": result_val}])
         try:
             result_df = pd.DataFrame(rows)
         except Exception:
@@ -1732,6 +1775,98 @@ def _compute_confidence(state: AgentState) -> float:
     return max(0.0, min(1.0, score))
 
 
+# ── AGENT 22b: Empty Result Recovery ────────────────────────
+def empty_result_recovery_agent(state: AgentState) -> AgentState:
+    """
+    When a query returns 0 rows, auto-discovers the actual distinct values
+    in the filtered columns and returns a helpful explanation.
+    Parses WHERE clause column names from the failed SQL and runs
+    SELECT DISTINCT queries to show the user what values actually exist.
+    """
+    sql     = state.get("generated_sql", "")
+    dataset = state["dataset"]
+    schema  = state.get("schema_text", "")
+
+    # Extract column names that appeared in WHERE clause
+    where_cols: list[str] = []
+    if sql:
+        where_match = re.search(r"WHERE\s+(.+?)(?:ORDER|GROUP|LIMIT|;|$)", sql,
+                                re.IGNORECASE | re.DOTALL)
+        if where_match:
+            where_text = where_match.group(1)
+            # Match col = 'val' and col IN (...) patterns (bare or quoted identifiers)
+            eq_cols = re.findall(
+                r'(?:"([^"]+)"|\b([A-Za-z_][A-Za-z0-9_]*)\b)\s*(?:=|\bIN\b)',
+                where_text, re.IGNORECASE
+            )
+            where_cols = [c[0] or c[1] for c in eq_cols if c[0] or c[1]]
+            # Remove SQL keywords and common noise
+            where_cols = [c for c in where_cols
+                          if c.upper() not in ("AND", "OR", "NOT", "NULL", "IN", "IS", "LIKE")]
+
+    if not where_cols:
+        return {
+            **state,
+            "final_answer": (
+                "The query returned 0 rows because no data matched your filter. "
+                "Try asking: **'What are the distinct values in each column?'** "
+                "to see the actual values in your dataset."
+            ),
+            "result_rows": [],
+            "row_count":   0,
+            "sql_error":   None,
+            "error":       None,
+        }
+
+    # Run DISTINCT queries for each WHERE column to find real values
+    distinct_info: list[str] = []
+    for col in where_cols[:4]:  # limit to first 4 cols
+        for table in dataset.tables:
+            qcol = f'"{col}"' if " " in col else col
+            qtbl = f'"{table.table_name}"'
+            try:
+                df = execute_sql_duckdb(
+                    f"SELECT DISTINCT {qcol} FROM {qtbl} ORDER BY 1 LIMIT 20",
+                    dataset
+                )
+                if not df.empty:
+                    vals = df.iloc[:, 0].astype(str).tolist()
+                    sample = ", ".join(f"`{v}`" for v in vals[:15])
+                    if len(vals) > 15:
+                        sample += f" … (+{len(vals)-15} more)"
+                    distinct_info.append(
+                        f"**`{col}`** actual values: {sample}"
+                    )
+                    break
+            except Exception:
+                continue
+
+    if distinct_info:
+        msg = (
+            "Your query returned **0 rows** because the filter values don't match "
+            "what's actually stored in the dataset.\n\n"
+            "Here are the **real values** in your filtered columns:\n\n"
+            + "\n".join(f"- {info}" for info in distinct_info)
+            + "\n\nUpdate your question using one of the values shown above."
+        )
+    else:
+        msg = (
+            "Your query returned 0 rows — the WHERE filter values may not "
+            "match what's in the dataset. Try asking: "
+            "**'Show me all distinct values in the Grade column'** (or whichever "
+            "column you're filtering on) to see the actual options."
+        )
+
+    return {
+        **state,
+        "final_answer": msg,
+        "result_rows":   [],
+        "row_count":     0,
+        "sql_error":     None,
+        "error":         None,
+    }
+
+
 # ── AGENT 22: Final ───────────────────────────────────────────
 def final_agent(state: AgentState) -> AgentState:
     """Assembles final answer."""
@@ -1747,6 +1882,10 @@ def final_agent(state: AgentState) -> AgentState:
 
     error    = state.get("error") or state.get("sql_error")
     attempts = state.get("sql_attempts", 0)
+
+    # If final_answer was already set by a recovery agent, don't overwrite
+    if state.get("final_answer"):
+        return state
 
     if error and not state.get("result_rows"):
         final = (
@@ -1822,11 +1961,9 @@ def route_after_execute(state: AgentState) -> str:
 def route_after_validate_result(state: AgentState) -> str:
     if state.get("result_valid"):
         return "stats_enricher"
-    # BUG FIX: empty results (0 rows) mean the SQL was valid but no data
-    # matched the filter. Retrying generates identical SQL and wastes 3
-    # Groq calls. Route straight to final so the user gets a clear message.
+    # Route 0-row results to recovery agent instead of generic error
     if state.get("result_issue") == "empty":
-        return "final"
+        return "empty_recovery"
     return "classify_error" if state.get("sql_attempts", 0) < MAX_SQL_RETRIES else "final"
 
 
@@ -1863,6 +2000,7 @@ def build_agent():
     graph.add_node("followup",        followup_agent)
     graph.add_node("memory_writer",   memory_writer_agent)
     graph.add_node("explain",         explain_agent)
+    graph.add_node("empty_recovery",  empty_result_recovery_agent)
     graph.add_node("final",           final_agent)
 
     graph.set_entry_point("router")
@@ -1904,8 +2042,10 @@ def build_agent():
     graph.add_conditional_edges("validate_result", route_after_validate_result, {
         "stats_enricher": "stats_enricher",
         "classify_error": "classify_error",
+        "empty_recovery": "empty_recovery",
         "final":          "final",
     })
+    graph.add_edge("empty_recovery", "final")
     
     # Python pipeline
     graph.add_edge("generate_python", "execute_python")

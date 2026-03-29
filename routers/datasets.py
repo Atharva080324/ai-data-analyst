@@ -1,8 +1,9 @@
 import uuid
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import pandas as pd
+import re
 from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
@@ -49,7 +50,7 @@ def pandas_dtype_to_sql(dtype) -> str:
     return "TEXT"
 
 
-def read_file_to_dataframes(file_path: Path, table_name: str = None) -> dict:
+def read_file_to_dataframes(file_path: Path, table_name: Optional[str] = None) -> dict:
     """
     Read CSV or Excel into {table_name: DataFrame}.
     For CSV: uses table_name parameter (dataset_name) instead of
@@ -117,7 +118,7 @@ def save_schema_to_db(
                     distinct = df[col].dropna().unique()[:10]
                     samples  = [str(v).strip() for v in distinct if str(v).strip()]
                     if samples:
-                        sample_values = ", ".join(samples[:10])
+                        sample_values = ", ".join([samples[i] for i in range(min(10, len(samples)))])
                 except Exception:
                     pass
 
@@ -201,8 +202,11 @@ def upload_dataset(
     Auto-detects all columns and data types.
     Saves schema to dataset_tables + dataset_columns.
     """
-    # Validate dataset name
-    dataset_name = dataset_name.strip()
+    # Validate and sanitize dataset name
+    dataset_name = re.sub(r'[^a-zA-Z0-9_]', '_', dataset_name.strip()).strip('_')
+    if not dataset_name:
+        uuid_hex = uuid.uuid4().hex
+        dataset_name = f"dataset_{''.join(uuid_hex[i] for i in range(min(8, len(uuid_hex))))}"
     if len(dataset_name) < 3:
         raise HTTPException(400, "Dataset name must be at least 3 characters")
     if len(dataset_name) > 100:
@@ -277,8 +281,11 @@ def upload_dataset(
         pass
     try:
         suggested_questions = generate_suggested_questions(dataset)
+        if suggested_questions:
+            dataset.suggested_questions = suggested_questions
+            db.commit()
     except Exception:
-        pass
+        db.rollback()
 
     return {
         "message":             f"'{dataset_name}' uploaded successfully",
@@ -483,9 +490,10 @@ def get_dataset_profile(
 
     profile = generate_profile(dataframes)
     return {
-        "dataset_id":   str(ds.id),
-        "dataset_name": ds.dataset_name,
-        "profile":      profile,
+        "dataset_id":          str(ds.id),
+        "dataset_name":        ds.dataset_name,
+        "profile":             profile,
+        "suggested_questions": ds.suggested_questions,
     }
 
 
